@@ -1,0 +1,37 @@
+
+GraphedExpression="(gimbal_cmd_send).yaw", Color=#a00909
+GraphedExpression="(gimbal_cmd_send).pitch", Color=#09a01b
+OpenDocument="tasks.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/Middlewares/Third_Party/FreeRTOS/Source/tasks.c", Line=3418
+OpenDocument="bsp_dwt.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/bsp/dwt/bsp_dwt.c", Line=73
+OpenDocument="gimbal.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/application/gimbal/gimbal.c", Line=57
+OpenDocument="chassis.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/application/chassis/chassis.c", Line=217
+OpenDocument="robot.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/application/robot.c", Line=3
+OpenDocument="robot_cmd.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/application/cmd/robot_cmd.c", Line=96
+OpenDocument="main.c", FilePath="E:/RM_ECU/rm_sentry_omni/basic_framework/Src/main.c", Line=65
+OpenToolbar="Debug", Floating=0, x=0, y=0
+OpenWindow="Call Stack", DockArea=RIGHT, x=0, y=1, w=958, h=63, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+OpenWindow="Registers 1", DockArea=RIGHT, x=0, y=2, w=958, h=166, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0, FilteredItems=[], RefreshRate=1
+OpenWindow="Source Files", DockArea=LEFT, x=0, y=1, w=789, h=340, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+OpenWindow="Disassembly", DockArea=LEFT, x=0, y=2, w=789, h=331, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+OpenWindow="Global Data", DockArea=RIGHT, x=0, y=0, w=958, h=110, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+OpenWindow="Watched Data 1", DockArea=LEFT, x=0, y=0, w=789, h=267, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+OpenWindow="Terminal", DockArea=BOTTOM, x=1, y=0, w=167, h=366, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+OpenWindow="Data Sampling", DockArea=BOTTOM, x=2, y=0, w=414, h=366, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0, VisibleTab=0, UniformSampleSpacing=0
+OpenWindow="Timeline", DockArea=RIGHT, x=0, y=3, w=958, h=598, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=1, DataPaneShown=1, PowerPaneShown=0, CodePaneShown=0, PinCursor="Cursor Movable", TimePerDiv="500 ms / Div", TimeStampFormat="Time", DataGraphDrawAsPoints=0, DataGraphLegendShown=1, DataGraphUniformSampleSpacing=0, DataGraphLegendPosition="628;0", PowerGraphDrawAsPoints=0, PowerGraphLegendShown=0, PowerGraphAvgFilterTime=Off, PowerGraphAvgFilterLen=Off, PowerGraphUniformSampleSpacing=0, PowerGraphLegendPosition="787;0", CodeGraphLegendShown=0, CodeGraphLegendPosition="793;0"
+OpenWindow="Console", DockArea=BOTTOM, x=0, y=0, w=1977, h=366, FilterBarShown=0, TotalValueBarShown=0, ToolBarShown=0
+TableHeader="Global Data", SortCol="Name", SortOrder="ASCENDING", VisibleCols=["Name";"Value";"Location";"Size";"Type";"Scope"], ColWidths=[174;100;100;100;100;368]
+TableHeader="Call Stack", SortCol="Function", SortOrder="ASCENDING", VisibleCols=["Function";"Stack Frame";"Source";"PC";"Return Address";"Stack Used"], ColWidths=[126;112;170;100;168;282]
+TableHeader="Source Files", SortCol="File", SortOrder="DESCENDING", VisibleCols=["File";"Status";"Size";"#Insts";"Path"], ColWidths=[204;100;100;100;698]
+TableHeader="Data Sampling Table", SortCol="Index", SortOrder="ASCENDING", VisibleCols=["Index";"Time";" (gimbal_cmd_send).yaw";" (gimbal_cmd_send).pitch"], ColWidths=[100;100;100;100]
+TableHeader="Data Sampling Setup", SortCol="Type", SortOrder="ASCENDING", VisibleCols=["Expression";"Type";"Value";"Min";"Max";"Average";"# Changes";"Min. Change";"Max. Change"], ColWidths=[346;100;100;100;100;100;100;100;100]
+TableHeader="Power Sampling", SortCol="Index", SortOrder="ASCENDING", VisibleCols=["Index";"Time";"Ch 0"], ColWidths=[100;100;100]
+TableHeader="Registers 1", SortCol="Name", SortOrder="ASCENDING", VisibleCols=["Name";"Value";"Description"], ColWidths=[100;105;736]
+TableHeader="Watched Data 1", SortCol="Expression", SortOrder="ASCENDING", VisibleCols=["Expression";"Value";"Location";"Refresh"], ColWidths=[196;171;100;322]
+TableHeader="RegisterSelectionDialog", SortCol="None", SortOrder="ASCENDING", VisibleCols=[], ColWidths=[]
+WatchedExpression="motor_rb", RefreshRate=5, Window=Watched Data 1
+WatchedExpression="rc_data", RefreshRate=5, Window=Watched Data 1
+WatchedExpression="gimba_IMU_data", RefreshRate=5, Window=Watched Data 1
+WatchedExpression="yaw_motor", RefreshRate=5, Window=Watched Data 1
+WatchedExpression="gimbal_cmd_send", Window=Watched Data 1
+WatchedExpression="gimbal_fetch_data", RefreshRate=5, Window=Watched Data 1
+WatchedExpression="chassis_cmd_recv", RefreshRate=5, Window=Watched Data 1
