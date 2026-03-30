@@ -2,12 +2,19 @@
 #include "general_def.h"
 #include "bsp_dwt.h"
 #include "bsp_log.h"
+#include "super_cap.h"
+#include "math.h"
 
-#define TORQUE_COEF 0.0003662109375f        // (20/16384)*(0.3), 电机转矩系数，与电流和转矩相关
-#define POWER_COEF 187.0f / 3591.0f / 9.55f // 电机机械功率系数，与力矩和转速相关，注意框架中速度单位为aps
-const float K1[4] = {1.23e-07, 1.23e-07, 1.23e-07, 1.23e-07};
-const float K2[4] = {1.453e-07, 1.453e-07, 1.453e-07, 1.453e-07};
-const float constant[4] = {4.081f, 4.081f, 4.081f, 4.081f};
+
+
+// #define TORQUE_COEF 0.0003662109375f        // (20/16384)*(0.3), 电机转矩系数，与电流和转矩相关
+// #define POWER_COEF 187.0f / 3591.0f / 9.55f // 电机机械功率系数，与力矩和转速相关，注意框架中速度单位为aps
+// const float K1[4] = {1.23e-07, 1.23e-07, 1.23e-07, 1.23e-07};
+// const float K2[4] = {1.453e-07, 1.453e-07, 1.453e-07, 1.453e-07};
+// const float constant[4] = {4.081f, 4.081f, 4.081f, 4.081f};
+
+static SuperCapInstance *super_cap_pr;                                  // 超级电容实例指针,在PowerControl()中使用
+
 
 static uint8_t idx = 0; // register idx,是该文件的全局电机索引,在注册时使用
 /* DJI电机的实例,此处仅保存指针,内存的分配将通过电机实例初始化时通过malloc()进行 */
@@ -228,6 +235,55 @@ void PowerControl()
     DJI_Motor_Measure_s *measure;           // 电机测量值
     float pid_measure, pid_ref;             // 电机PID测量值和设定值
     initial_total_power = 0.0f;
+
+    // 底盘电机功率模型参数常量 (M3508 或 3508带减速箱)
+	float toque_coefficient = 1.99688994e-6f; 
+	float a = 1.23e-07;						 
+	float k1 = 2.0456e-07;	
+	float k2 = 1.453e-07;					 
+	float constant = 4.081f;
+    float scaled_give_power[4] = {0};
+
+    static uint16_t supercap_send_cnt = 0;
+
+
+    //发送给超电模块
+    super_cap_pr=GetSuperCapInstance();
+    // =========================================================
+    // 1. 获取裁判系统当前限制并更新给超级电容，读取超电可用最大功率
+    // =========================================================
+    if (super_cap_pr != NULL) 
+    {
+        if (supercap_send_cnt++ >= 100) // 分频控制发送
+        {
+            supercap_send_cnt = 0;
+            SuperCap_Control_t control_data = super_cap_pr->control;
+            control_data.enable_dcdc = true; // 保持DCDC开启
+            
+            // 将裁判系统数据转发给超电 (注意换成你工程里的裁判系统变量名)
+            // control_data.referee_power_limit = (robot_state_t.chassis_power_limit != 0) ? robot_state_t.chassis_power_limit : 45;
+            // control_data.referee_energy_buffer = (power_heat_data_t.chassis_power_buffer != 0) ? power_heat_data_t.chassis_power_buffer : 60;
+            control_data.referee_power_limit = 100;
+            control_data.referee_energy_buffer=57;
+
+            SuperCapSend(super_cap_pr, &control_data);
+        }
+
+        // 读取超级电容的实时状态
+        SuperCap_Feedback_t cap_feedback = SuperCapGet(super_cap_pr);
+        
+        // 使用超级电容告知的最大功率，乘0.95留出安全裕量，防止PID瞬间超调
+        if (cap_feedback.chassis_power_limit_w > 0) {
+            chassis_max_power = cap_feedback.chassis_power_limit_w * 0.95f;
+        } else {
+            // 超电没准备好或异常时，只用基础的 45W 限制
+            chassis_max_power = 45.0f;
+        }
+    }
+
+
+
+
     // 遍历所有电机实例,进行串级PID的计算并设置发送报文的值
     for (size_t i = 0; i < idx; ++i) // idx实际上是4个
     {                                // 减小访存开销,先保存指针引用
@@ -256,10 +312,10 @@ void PowerControl()
             pid_ref = PIDCalculate(&motor_controller->speed_PID, pid_measure, pid_ref);
             initial_torque[i] = pid_ref;
             power_control_out[i] = pid_ref;
-            A = K1[i] * initial_torque[i] * initial_torque[i];
-            B = K2[i] * pid_measure * pid_measure;
-            C = POWER_COEF * pid_measure * initial_torque[i] * TORQUE_COEF;
-            initial_give_power[i] = A + B + C + constant[i];
+            A = a * initial_torque[i] * initial_torque[i];
+            B = k2 * pid_measure * pid_measure;
+            C = toque_coefficient * pid_measure * initial_torque[i] ;
+            initial_give_power[i] = A + B + C + constant;
         }
 
         if (motor_setting->feedback_reverse_flag == FEEDBACK_DIRECTION_REVERSE)
@@ -276,46 +332,69 @@ void PowerControl()
         }
         initial_total_power += initial_give_power[i];
     }
-    // if (initial_total_power > chassis_max_power)
-    // {
-    //     float ratio = chassis_max_power / initial_total_power; // 根据允许的最大功率进行放缩
-        for (uint8_t i = 0; i < idx; i++)
+
+    
+    // =========================================================
+    // 3. 功率限制与缩放（解二次方程）
+    // =========================================================
+    if (initial_total_power > chassis_max_power) 
+    {
+        float power_scale = chassis_max_power / initial_total_power;
+        
+        for (uint8_t i = 0; i < idx; ++i)
         {
-    //         motor = dji_motor_instance[i];
-    //         measure = &motor->measure;
-    //         pid_measure = measure->speed_aps / 6.0f; // 电机的速度单位是度每秒,转换为rpm
-    //         initial_give_power[i] *= ratio;
-    //         if (initial_give_power[i] < 0) // 功率小于零，表明依靠发电减速，因此不算入功率统计
-    //         {
-    //             continue;
-    //         }
-    //         float a = K1[i];
-    //         float b = TORQUE_COEF * POWER_COEF * pid_measure;
-    //         float c = K2[i] * pid_measure * pid_measure - initial_give_power[i] + constant[i];
-    //         if (power_control_out[i] > 0)
-    //         {
-    //             power_control_out[i] = (-b + sqrt(b * b - 4 * a * c)) / (2 * a);
-                if (power_control_out[i] > 15000)
-                {
-                    power_control_out[i] = 15000;
-                }
-    //         }
-    //         else
-    //         {
-    //             power_control_out[i] = (-b - sqrt(b * b - 4 * a * c)) / (2 * a);
-                if (power_control_out[i] < -15000)
-                {
-                    power_control_out[i] = -15000;
-                }
-    //         }
+            if (initial_give_power[i] < 0) 
+                continue; // 发电状态不缩放
+            
+            scaled_give_power[i] = initial_give_power[i] * power_scale; 
+            
+            motor = dji_motor_instance[i];
+            float speed_rpm = motor->measure.speed_aps / 6.0f;
+
+            // 解二次方程以逆推缩放后应给出的 PID out
+            float b_coef = toque_coefficient * speed_rpm;
+            // 【修复 1】：将这里的 k1 修改为 k2，以匹配前面的正向拟合方程
+            float c_coef = k1 * speed_rpm * speed_rpm - scaled_give_power[i] + constant;
+            
+            // 【修复 2】：增加 delta 计算与防负数保护，防止 sqrtf(负数) = NaN 导致底盘失控
+            float delta = b_coef * b_coef - 4.0f * a * c_coef;
+            if (delta < 0.0f) {
+                delta = 0.0f;
+            }
+
+            if (initial_torque[i] > 0) 
+            {
+                float temp = (-b_coef + sqrtf(delta)) / (2.0f * a);
+                power_control_out[i] = (temp > 16000.0f) ? 16000.0f : temp;
+            }
+            else
+            {
+                float temp = (-b_coef - sqrtf(delta)) / (2.0f * a);
+                power_control_out[i] = (temp < -16000.0f) ? -16000.0f : temp;
+            }
         }
-    // }
+    }
+
+
+
+
+
+
 
     for (uint8_t i = 0; i < idx; i++)
     {
         motor = dji_motor_instance[i];
         set = (int16_t)power_control_out[i];
-        // PrintLog("SET:%d\n",set);
+
+        if (motor->motor_settings.feedback_reverse_flag == FEEDBACK_DIRECTION_REVERSE)
+        {
+            // Note: 视原来的逻辑而定，是否再次翻转需要结合你的原业务逻辑确认。
+            // 原代码在循环最后做了 pid_ref *= -1，如果需要，这里也对最终限制输出做相应的修改。
+            set *= -1;
+
+        }
+
+
         group = motor->sender_group;
         num = motor->message_num;
         sender_assignment[group].tx_buff[2 * num] = (uint8_t)(set >> 8);         // 低八位

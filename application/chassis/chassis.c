@@ -129,7 +129,7 @@ void ChassisInit()
 
 
     IMU_DATA=get_IMU_data();
-    referee_data = UITaskInit(&huart1, &ui_data); // 裁判系统初始化,会同时初始化UI
+    referee_data = UITaskInit(&huart6, &ui_data); // 裁判系统初始化,会同时初始化UI
 
 /* Buffer环暂未测试，逻辑是计算期望buffer与实际buffer的差值，转换为冗余的功率，todo：输入给功率控制部分，待完善 */
     PID_Init_Config_s Buffer_pid_conf = {
@@ -144,8 +144,8 @@ void ChassisInit()
     SuperCap_Init_Config_s cap_conf = {
         .can_config = {
             .can_handle = &hcan2,
-            .tx_id = 0x302, // 超级电容默认接收id
-            .rx_id = 0x301, // 超级电容默认发送id,注意tx和rx在其他人看来是反的
+            .tx_id = 0x061, // 超级电容默认接收id
+            .rx_id = 0x052, // 超级电容默认发送id,注意tx和rx在其他人看来是反的
         }};
     cap = SuperCapInit(&cap_conf); // 超级电容初始化
 
@@ -199,20 +199,26 @@ static void OminiCalculate()
     float vy = chassis_vy * SQRT_OVER_TWO;
     float vw = chassis_cmd_recv.wz * CHASSIS_CENTER;
 
+    if(chassis_cmd_recv.mode==1)
+    {
+        //导航模式底盘
+        vt_rf =   vx - vy + vw; 
+        vt_lf =   - vx - vy + vw;
+        vt_rb =  vx + vy + vw;
+        vt_lb =   -vx + vy + vw;        
+    }
+    else if(chassis_cmd_recv.mode==2)
+    {
+        //小陀螺跟随模式底盘
+        vt_lf =   vx - vy + vw; 
+        vt_rf =   - vx - vy + vw;
+        vt_lb =  vx + vy + vw;
+        vt_rb =   -vx + vy + vw;
+    }
 
 
-    //小陀螺跟随模式底盘
-    // vt_lf =   vx - vy + vw; 
-    // vt_rf =   - vx - vy + vw;
-    // vt_lb =  vx + vy + vw;
-    // vt_rb =   -vx + vy + vw;
 
 
-    //导航模式底盘
-    vt_rf =   vx - vy + vw; 
-    vt_lf =   - vx - vy + vw;
-    vt_rb =  vx + vy + vw;
-    vt_lb =   -vx + vy + vw;
 
 
 
@@ -311,7 +317,7 @@ void ChassisTask()
         break;
     case CHASSIS_ROTATE: // 自旋,同时保持全向机动;当前wz维持定值,后续增加不规则的变速策略
         chassis_cmd_recv.wz=chassis_cmd_recv.chassis_spin_speed;
-        // chassis_cmd_recv.wz = 7.0f;
+        // chassis_cmd_recv.wz = 12.0f;
         break;
     default:
         break;
@@ -320,7 +326,15 @@ void ChassisTask()
     // 根据云台和底盘的角度offset将控制量映射到底盘坐标系上
     // 底盘逆时针旋转为角度正方向;云台命令的方向以云台指向的方向为x,采用右手系(x指向正北时y在正东)
 
-    chassis_angle=IMU_DATA->Yaw-chassis_cmd_recv.offset_angle;      
+    if(chassis_cmd_recv.mode==1)
+    {
+        chassis_angle=IMU_DATA->Yaw-chassis_cmd_recv.offset_angle;      
+         
+    }
+    else if(chassis_cmd_recv.mode==2)
+    {
+        chassis_angle=chassis_cmd_recv.offset_angle; 
+    }
     //归一化处理
     chassis_angle = normalize_rad(chassis_angle);
 

@@ -9,21 +9,23 @@
 #define SUPER_CAP_H
 
 #include "bsp_can.h"
+#include "super_cap_sdk.h" // 引入新SDK头文件
 
-#pragma pack(1)
-typedef struct
-{
-    uint16_t vol; // 电压
-    uint16_t current; // 电流
-    uint16_t power; // 功率
-} SuperCap_Msg_s;
-#pragma pack()
+// #pragma pack(1)
+// typedef struct
+// {
+//     uint16_t vol; // 电压
+//     uint16_t current; // 电流
+//     uint16_t power; // 功率
+// } SuperCap_Msg_s;
+// #pragma pack()
 
 /* 超级电容实例 */
 typedef struct
 {
-    CANInstance *can_ins; // CAN实例
-    SuperCap_Msg_s cap_msg; // 超级电容信息
+    CANInstance *can_ins;
+    SuperCap_Feedback_t feedback; // 替换原来的 SuperCap_Msg_s
+    SuperCap_Control_t control;   // 新增控制参数缓存
 } SuperCapInstance;
 
 /* 超级电容初始化配置 */
@@ -32,20 +34,11 @@ typedef struct
     CAN_Init_Config_s can_config;
 } SuperCap_Init_Config_s;
 
-/**
- * @brief 初始化超级电容
- * 
- * @param supercap_config 超级电容初始化配置
- * @return SuperCapInstance* 超级电容实例指针
- */
+// 函数声明更新
 SuperCapInstance *SuperCapInit(SuperCap_Init_Config_s *supercap_config);
+void SuperCapSend(SuperCapInstance *instance, SuperCap_Control_t *control_data);
+SuperCap_Feedback_t SuperCapGet(SuperCapInstance *instance);
+SuperCapInstance *GetSuperCapInstance(void); 
 
-/**
- * @brief 发送超级电容控制信息
- * 
- * @param instance 超级电容实例
- * @param data 超级电容控制信息
- */
-void SuperCapSend(SuperCapInstance *instance, uint8_t *data);
 
 #endif // !SUPER_CAP_Hd

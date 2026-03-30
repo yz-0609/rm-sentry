@@ -13,6 +13,18 @@
 
 /* ----------------------------下面是pid优化环节的实现---------------------------- */
 
+/**
+  *  角度归一化处理（单位deg）
+ **/
+static float normalize_rad_yaw(float deg)
+{
+    // 把任意角度归一化到 [-PI, PI]
+    while (deg > 180.0f)   deg -= 360.0f;
+    while (deg < -180.0f)  deg += 360.0f;
+    return deg;	
+}
+
+
 // 梯形积分
 static void f_Trapezoid_Intergral(PIDInstance *pid)
 {
@@ -156,7 +168,7 @@ float PIDCalculate(PIDInstance *pid, float measure, float ref)
     pid->Measure = measure;
     pid->Ref = ref;
     pid->Err = pid->Ref - pid->Measure;
-
+    
     // // 如果在死区外,则计算PID
     // if (abs(pid->Err) > pid->DeadBand)
     // {
@@ -212,3 +224,8 @@ float PIDCalculate(PIDInstance *pid, float measure, float ref)
 
 
 }
+
+
+
+
+

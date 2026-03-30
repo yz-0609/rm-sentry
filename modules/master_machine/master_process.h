@@ -52,7 +52,7 @@ typedef struct
 	
 	sentrycmd_t Sentry_Cmd; // 哨兵模式指令
 
-
+	
 	ReceiveDataRobotCmd_s cmd;
 	
 } Vision_Recv_s;

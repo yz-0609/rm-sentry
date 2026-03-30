@@ -480,6 +480,10 @@ typedef struct RobotCmdData
             uint8_t fire;
             uint8_t fric_on;
         } __packed__ shoot;
+        struct
+        {
+            bool tracking;
+        } __packed__ tracking;
     } __packed__ data;
     uint16_t checksum;
 } __packed__ ReceiveDataRobotCmd_s;

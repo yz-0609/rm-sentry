@@ -1,6 +1,7 @@
 #include "shoot.h"
 #include "robot_def.h"
-
+#include "rm_referee.h"
+#include "referee_task.h"
 #include "dji_motor.h"
 #include "message_center.h"
 #include "bsp_dwt.h"
@@ -9,6 +10,9 @@
 /* 对于双发射机构的机器人,将下面的数据封装成结构体即可,生成两份shoot应用实例 */
 static DJIMotorInstance *friction_l, *friction_r, *loader; // 拨盘电机
 // static servo_instance *lid; 需要增加弹舱盖
+
+#define MAX_CURRENT    13000.0f // 拨蛋轮的最大电流,单位为mA,用于堵蛋,需要实测后填入
+
 
 static Publisher_t *shoot_pub;
 static Shoot_Ctrl_Cmd_s shoot_cmd_recv; // 来自cmd的发射控制信息
@@ -19,6 +23,10 @@ static float erro;
 static float ref;
 // dwt定时,计算冷却用
 static float hibernate_time = 0, dead_time = 0;
+
+
+//裁判系统数据接收
+static referee_info_t * refer_shoot_data;
 
 void ShootInit()
 {
@@ -63,6 +71,9 @@ void ShootInit()
     friction_config.can_init_config.tx_id = 7; // 左摩擦轮,改txid和方向就行
     friction_config.controller_setting_init_config.motor_reverse_flag = MOTOR_DIRECTION_REVERSE;
     friction_l = DJIMotorInit(&friction_config);
+
+
+    refer_shoot_data = GetRefereeInfo();
 
     // 拨盘电机
     Motor_Init_Config_s loader_config = {
@@ -110,6 +121,17 @@ void ShootInit()
     shoot_sub = SubRegister("shoot_cmd", sizeof(Shoot_Ctrl_Cmd_s));
 }
 
+
+static uint8_t shoot_check(void)
+{
+    if(refer_shoot_data->PowerHeatData.shooter_17mm_barrel_heat<refer_shoot_data->GameRobotState.shooter_barrel_heat_limit-50) // 如果发射热量接近上限,则不允许发射
+    {
+        return 1;
+    }
+    return 0;
+}
+
+
 /* 机器人发射机构控制核心任务 */
 void ShootTask()
 {
@@ -151,9 +173,25 @@ void ShootTask()
         }
         if(shoot_cmd_recv.load_mode==LOAD_BURSTFIRE)
         {
-            
-            DJIMotorEnable(loader);
-            DJIMotorSetRef(loader,8000);
+            if(shoot_check())
+            {
+                //简单堵转逻辑
+                if(loader->measure.real_current>MAX_CURRENT)
+                {
+                    DJIMotorEnable(loader);
+                    DJIMotorSetRef(loader,-9000);
+                } 
+                else
+                {
+                    DJIMotorEnable(loader);
+                    DJIMotorSetRef(loader,9000);
+                }
+            }
+            else
+            {
+                DJIMotorStop(loader);
+            }
+
         }
 
         

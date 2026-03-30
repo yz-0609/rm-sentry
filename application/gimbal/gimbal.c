@@ -18,6 +18,10 @@ static Gimbal_Ctrl_Cmd_s gimbal_cmd_recv;         // 来自cmd的控制信息
 
 static float target_pitch,target_yaw;
 
+static float yaw_speed_ff = 0; // 定义yaw电机速度前馈变量
+static float last_target_yaw;  // 用于保存上一次的目标角度
+
+
 
 static float ref_yaw,ref_pitch;
 
@@ -41,18 +45,18 @@ void GimbalInit()
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 0.7, //  0.5
-                .Ki = 0,//0.5
-                .Kd = 1.1,  // 500  1.2
+                .Kp = 1.0, // 1.0  
+                .Ki = 0,
+                .Kd = 1.2, // 1.2
                 .DeadBand = 0,//0.1
                 .Improve = PID_Integral_Limit | PID_Derivative_On_Measurement, //,//PID_IMPROVE_NONE//PID_Trapezoid_Intergral |
-                .IntegralLimit = 100,
+                .IntegralLimit = 200,
 
-                .MaxOut = 120,
+                .MaxOut = 400,
             },
             .speed_PID = {
-                .Kp = 1600,  // 50  130   400  5000 7000   9000   6
-                .Ki = 75, // 200  0.1   0.1   10  18  700
+                .Kp = 1550,  // 1500
+                .Ki = 45, // 30  35
                 .Kd = 0,
                 .Improve = PID_Integral_Limit | PID_Derivative_On_Measurement,//PID_Trapezoid_Intergral |PID_IMPROVE_NONE,// 
                 .IntegralLimit = 10000,
@@ -62,10 +66,12 @@ void GimbalInit()
 
             // 还需要增加角速度额外反馈指针,注意方向,ins_task.md中有c板的bodyframe坐标系说明
             .other_speed_feedback_ptr = &gimba_IMU_data->Gyro[2],
+            .speed_feedforward_ptr = &yaw_speed_ff, // 传入速度前馈指针
         },
         .controller_setting_init_config = {
             .angle_feedback_source = OTHER_FEED,
             .speed_feedback_source = OTHER_FEED,    //编码器速度反馈
+            // .feedforward_flag = SPEED_FEEDFORWARD,  // 启用速度前馈
             .outer_loop_type = ANGLE_LOOP,
             //.close_loop_type = SPEED_LOOP,
             .close_loop_type = ANGLE_LOOP | SPEED_LOOP,
@@ -81,12 +87,12 @@ void GimbalInit()
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 1.5, // 2500   2000    2100
-                .Ki = 0,
-                .Kd = 0.5,//120   450   120
+                .Kp = 800, // 2500   2000    2100   1.5
+                .Ki = 50,
+                .Kd = 150,//120   450   120    0.5
                 .Improve = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
-                .IntegralLimit = 100,
-                .MaxOut = 100,
+                .IntegralLimit = 200,
+                .MaxOut = 30000,
             },
             .speed_PID = {
                 .Kp = 1700,  // 6500
@@ -105,7 +111,8 @@ void GimbalInit()
             .speed_feedback_source = OTHER_FEED,
             .outer_loop_type = ANGLE_LOOP, // 初始化成SPEED_LOOP,让拨盘停在原地,防止拨盘上电时乱转
 
-            .close_loop_type = ANGLE_LOOP | SPEED_LOOP,
+            // .close_loop_type = ANGLE_LOOP | SPEED_LOOP,
+            .close_loop_type = ANGLE_LOOP,
 
             .motor_reverse_flag = MOTOR_DIRECTION_REVERSE,
         },
@@ -183,6 +190,9 @@ void GimbalTask()
     // 设置反馈数据,主要是imu和yaw的ecd
     gimbal_feedback_data.gimbal_imu_data = *gimba_IMU_data;
     gimbal_feedback_data.yaw_motor_single_round_angle = yaw_motor->measure.angle_single_round;
+
+    yaw_speed_ff =-(gimbal_cmd_recv.yaw - last_target_yaw) * 10.0f;
+    last_target_yaw = gimbal_cmd_recv.yaw;
 
     // 推送消息
     PubPushMessage(gimbal_pub, (void *)&gimbal_feedback_data);

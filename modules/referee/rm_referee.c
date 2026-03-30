@@ -33,11 +33,15 @@ static referee_info_t referee_info;			  // 裁判系统数据
 static void JudgeReadData(uint8_t *buff)
 {
 	uint16_t judge_length; // 统计一帧数据长度
+	uint16_t data_length;       // 提取的数据段长度 (data部分)
+	uint16_t next_frame_offset; // 连包时下一帧的偏移量
+
+
 	if (buff == NULL)	   // 空数据包，则不作任何处理
 		return;
 
-	// 写入帧头数据(5-byte),用于判断是否开始存储裁判数据
-	memcpy(&referee_info.FrameHeader, buff, LEN_HEADER);
+	// // 写入帧头数据(5-byte),用于判断是否开始存储裁判数据
+	// memcpy(&referee_info.FrameHeader, buff, LEN_HEADER);
 
 	// 判断帧头数据(0)是否为0xA5
 	if (buff[SOF] == REFEREE_SOF)
@@ -45,8 +49,13 @@ static void JudgeReadData(uint8_t *buff)
 		// 帧头CRC8校验
 		if (Verify_CRC8_Check_Sum(buff, LEN_HEADER) == TRUE)
 		{
+			// 写入帧头数据(5-byte),用于判断是否开始存储裁判数据
+			memcpy(&referee_info.FrameHeader, buff, LEN_HEADER);
+			// 假设偏移量 DATA_LENGTH 为 1
+			data_length = (buff[2] << 8) | buff[1];
 			// 统计一帧数据长度(byte),用于CR16校验
-			judge_length = buff[DATA_LENGTH] + LEN_HEADER + LEN_CMDID + LEN_TAIL;
+			judge_length = data_length + LEN_HEADER + LEN_CMDID + LEN_TAIL;
+			// judge_length = buff[DATA_LENGTH] + LEN_HEADER + LEN_CMDID + LEN_TAIL;
 			// 帧尾CRC16校验
 			if (Verify_CRC16_Check_Sum(buff, judge_length) == TRUE)
 			{
@@ -63,13 +72,10 @@ static void JudgeReadData(uint8_t *buff)
 					memcpy(&referee_info.GameResult, (buff + DATA_Offset), LEN_game_result);
 					break;
 				case ID_game_robot_survivors: // 0x0003   机器人血量数据，用到已修改
-					memcpy(&referee_info.GameRobotHP, (buff + DATA_Offset), sizeof(ext_game_robot_HP_t));
+					memcpy(&referee_info.GameRobotHP, (buff + DATA_Offset), LEN_game_robot_HP);
 					break;
 				case ID_event_data: // 0x0101   场地事件数据
 					memcpy(&referee_info.EventData, (buff + DATA_Offset), LEN_event_data);
-					break;
-				case ID_supply_projectile_action: // 0x0102      无
-					memcpy(&referee_info.SupplyProjectileAction, (buff + DATA_Offset), LEN_supply_projectile_action);
 					break;
 				case ID_game_robot_state: // 0x0201    机器人性能体系数据
 					memcpy(&referee_info.GameRobotState, (buff + DATA_Offset), LEN_game_robot_state);
@@ -81,10 +87,7 @@ static void JudgeReadData(uint8_t *buff)
 					memcpy(&referee_info.GameRobotPos, (buff + DATA_Offset), LEN_game_robot_pos);
 					break;
 				case ID_buff_musk: // 0x0204   机器人增益和底盘能量数据
-					memcpy(&referee_info.BuffMusk, (buff + DATA_Offset), sizeof(ext_buff_musk_t));
-					break;
-				case ID_aerial_robot_energy: // 0x0205  无
-					memcpy(&referee_info.AerialRobotEnergy, (buff + DATA_Offset), LEN_aerial_robot_energy);
+					memcpy(&referee_info.BuffMusk, (buff + DATA_Offset), LEN_buff_musk);
 					break;
 				case ID_robot_hurt: // 0x0206    伤害状态数据
 					memcpy(&referee_info.RobotHurt, (buff + DATA_Offset), LEN_robot_hurt);
@@ -95,27 +98,33 @@ static void JudgeReadData(uint8_t *buff)
 				case ID_student_interactive: // 0x0301   syhtodo接收代码未测试
 					memcpy(&referee_info.ReceiveData, (buff + DATA_Offset), LEN_receive_data);
 					break;
-				
 				case ID_RFID_status: // 0x209  RFID状态数据
-					memcpy(&referee_info.RFIDStatus, (buff + DATA_Offset), sizeof(rfid_status_t));
+					memcpy(&referee_info.RFIDStatus, (buff + DATA_Offset), LEN_RFID_status);
 					break;
 				case ID_ground_robot_pos: // 0x20B  地面机器人位置数据
-					memcpy(&referee_info.GroundRobotPos, (buff + DATA_Offset), sizeof(ground_robot_position_t));
+					memcpy(&referee_info.GroundRobotPos, (buff + DATA_Offset), LEN_ground_robot_pos);
 					break;
 				case ID_projectile_allowance: // 0x208  允许发弹量数据
-					memcpy(&referee_info.ProjectileAllowance, (buff + DATA_Offset), sizeof(projectile_allowance_t));
+					memcpy(&referee_info.ProjectileAllowance, (buff + DATA_Offset), LEN_projectile_allowance);
 					break;
 				case ID_sentry_decision: // 0x20D  哨兵自主决策信息同步
-					memcpy(&referee_info.SentryInfo, (buff + DATA_Offset), sizeof(sentry_info_t));
+					memcpy(&referee_info.SentryInfo, (buff + DATA_Offset), LEN_sentry_decision);
 					break;
 				}
 			}
 		}
+		// 计算下一帧的偏移量
+		next_frame_offset = LEN_HEADER + LEN_CMDID + data_length + LEN_TAIL;
 		// 首地址加帧长度,指向CRC16下一字节,用来判断是否为0xA5,从而判断一个数据包是否有多帧数据
-		if (*(buff + sizeof(xFrameHeader) + LEN_CMDID + referee_info.FrameHeader.DataLength + LEN_TAIL) == 0xA5)
-		{ // 如果一个数据包出现了多帧数据,则再次调用解析函数,直到所有数据包解析完毕
-			JudgeReadData(buff + sizeof(xFrameHeader) + LEN_CMDID + referee_info.FrameHeader.DataLength + LEN_TAIL);
+		if (buff[next_frame_offset] == REFEREE_SOF)
+		{ 
+			// 如果一个数据包出现多帧数据,则再次调用解析函数,直到所有数据包解析完毕
+			JudgeReadData(buff + next_frame_offset);
 		}
+		// if (*(buff + sizeof(xFrameHeader) + LEN_CMDID + referee_info.FrameHeader.DataLength + LEN_TAIL) == 0xA5)
+		// { // 如果一个数据包出现了多帧数据,则再次调用解析函数,直到所有数据包解析完毕
+		// 	JudgeReadData(buff + sizeof(xFrameHeader) + LEN_CMDID + referee_info.FrameHeader.DataLength + LEN_TAIL);
+		// }
 	}
 }
 
@@ -159,4 +168,11 @@ void RefereeSend(uint8_t *send, uint16_t tx_len)
 {
 	USARTSend(referee_usart_instance, send, tx_len, USART_TRANSFER_DMA);
 	osDelay(115);
+}
+
+
+
+referee_info_t* GetRefereeInfo(void)
+{
+	return &referee_info;
 }

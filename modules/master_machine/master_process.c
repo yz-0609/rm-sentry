@@ -235,7 +235,7 @@ Vision_Recv_s *VisionInit(UART_HandleTypeDef *_handle)
 
 
     //接受裁判系统数据指针
-    refer_data=get_referr_data_pr();
+    refer_data=GetRefereeInfo();
 
 
     // masterProcess_pub = SubRegister("master_cmd",sizeof(ReceiveDataRobotCmd_s));
@@ -412,29 +412,29 @@ void UsbSendData(void)
     // 发送Imu数据
     UsbSendImuData();    
     // 发送RobotStateInfo数据
-    UsbSendRobotStateInfoData();   //后续修改
-    // 发送Event数据
-    UsbSendEventData();
+    // UsbSendRobotStateInfoData();   //后续修改
+    // // 发送Event数据
+    // UsbSendEventData();
     // 发送PidDebug数据
     // CheckDurationAndSend(Pid);
-    // 发送AllRobotHp数据
-    UsbSendAllRobotHpData(); 
+    // // 发送AllRobotHp数据
+    // UsbSendAllRobotHpData(); 
     // 发送GameStatus数据
-    UsbSendGameStatusData();
-    // 发送RobotMotion数据
-    UsbSendRobotMotionData();
-    // 发送GroundRobotPosition数据
-    UsbSendGroundRobotPositionData();
+    UsbSendGameStatusData();    //比赛状态
+    // // 发送RobotMotion数据
+    // UsbSendRobotMotionData();
+    // // 发送GroundRobotPosition数据
+    // UsbSendGroundRobotPositionData();
     // 发送RfidStatus数据
     UsbSendRfidStatusData();
     // 发送RobotStatus数据
-    UsbSendRobotStatusData();
+    UsbSendRobotStatusData();   //机器人状态
     // 发送JointState数据
-    UsbSendJointStateData();
-    // 发送Buff数据
-    UsbSendBuffData();
-    // 发送SentryInfo数据
-    UsbSendSentryInfoData();
+    // UsbSendJointStateData();
+    // // 发送Buff数据
+    // UsbSendBuffData();
+    // // 发送SentryInfo数据
+    // UsbSendSentryInfoData();
 }
 
 
@@ -717,10 +717,10 @@ static void UsbSendRobotStatusData(void)
     SEND_ROBOT_STATUS_DATA.data.maximum_hp= refer_data->GameRobotState.maximum_HP;
     SEND_ROBOT_STATUS_DATA.data.shooter_barrel_cooling_value= refer_data->GameRobotState.shooter_barrel_cooling_value;
     SEND_ROBOT_STATUS_DATA.data.shooter_barrel_heat_limit= refer_data->GameRobotState.shooter_barrel_heat_limit;
-    SEND_ROBOT_STATUS_DATA.data.shooter_17mm_1_barrel_heat=refer_data->PowerHeatData.shooter_17mm_1_barrel_heat;
+    SEND_ROBOT_STATUS_DATA.data.shooter_17mm_1_barrel_heat=refer_data->PowerHeatData.shooter_17mm_barrel_heat;
     SEND_ROBOT_STATUS_DATA.data.robot_pos_x=refer_data->GameRobotPos.x;
     SEND_ROBOT_STATUS_DATA.data.robot_pos_y=refer_data->GameRobotPos.y;
-    SEND_ROBOT_STATUS_DATA.data.robot_pos_angle=refer_data->GameRobotPos.yaw;
+    SEND_ROBOT_STATUS_DATA.data.robot_pos_angle=refer_data->GameRobotPos.angle;
     SEND_ROBOT_STATUS_DATA.data.armor_id=refer_data->RobotHurt.armor_id;
     SEND_ROBOT_STATUS_DATA.data.hp_deduction_reason=refer_data->RobotHurt.hurt_type;
     SEND_ROBOT_STATUS_DATA.data.projectile_allowance_17mm=refer_data->ProjectileAllowance.projectile_allowance_17mm;

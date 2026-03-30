@@ -84,10 +84,10 @@ typedef enum
 	ID_shoot_data = 0x0207,				   // 实时射击数据
 	ID_student_interactive = 0x0301,	   // 机器人间交互数据
 
-	ID_RFID_status= 0x209,   		           // RFID状态数据
-	ID_ground_robot_pos = 0x20B,			   // 地面机器人位置数据
-	ID_projectile_allowance = 0x208,		   // 允许发弹量数据
-	ID_sentry_decision = 0x20D,			   // 哨兵自主决策信息同步
+	ID_RFID_status= 0x0209,   		           // RFID状态数据
+	ID_ground_robot_pos = 0x020B,			   // 地面机器人位置数据
+	ID_projectile_allowance = 0x0208,		   // 允许发弹量数据
+	ID_sentry_decision = 0x020D,			   // 哨兵自主决策信息同步
 
 } CmdID_e;
 
@@ -96,16 +96,22 @@ typedef enum
 {
 	LEN_game_state = 11,						 // 0x0001
 	LEN_game_result = 1,						 // 0x0002
-	LEN_game_robot_HP = 32,						 // 0x0003
+	LEN_game_robot_HP = 16,						 // 0x0003
 	LEN_event_data = 4,							 // 0x0101
-	LEN_supply_projectile_action = 4,			 // 0x0102
+	LEN_supply_projectile_action = 4,			 // 0x0102    没有使用
 	LEN_game_robot_state = 13,					 // 0x0201
-	LEN_power_heat_data = 16,					 // 0x0202
+	LEN_power_heat_data = 14,					 // 0x0202
 	LEN_game_robot_pos = 16,					 // 0x0203
-	LEN_buff_musk = 6,							 // 0x0204
-	LEN_aerial_robot_energy = 2,				 // 0x0205
+	LEN_buff_musk = 8,							 // 0x0204
+	LEN_aerial_robot_energy = 2,				 // 0x0205   没有使用
 	LEN_robot_hurt = 1,							 // 0x0206
 	LEN_shoot_data = 7,							 // 0x0207
+	LEN_projectile_allowance = 8,				 // 0x0208
+	LEN_RFID_status = 5,						 // 0x0209
+	LEN_ground_robot_pos = 40,					 // 0x020B
+	LEN_sentry_decision = 6,					 // 0x020D
+
+
 	LEN_receive_data = 6 + Communicate_Data_LEN, // 0x0301
 
 } JudgeDataLength_e;
@@ -174,33 +180,31 @@ typedef struct
 /* ID: 0X0202  Byte: 16    实时功率热量数据 */  //需要修改
 typedef struct
 {
-	uint16_t chassis_voltage; 
-	uint16_t chassis_current; 
-	float chassis_power; 
+	uint16_t reserved1; 
+	uint16_t reserved2; 
+	float reserved3; 
 	uint16_t buffer_energy; 
-	uint16_t shooter_17mm_1_barrel_heat; 
-	uint16_t shooter_17mm_2_barrel_heat; 
-	uint16_t shooter_42mm_barrel_heat; 
+	uint16_t shooter_17mm_barrel_heat; 
+	uint16_t shooter_42mm_barrel_heat;
 } ext_power_heat_data_t;
 
 /* ID: 0x0203  Byte: 16    机器人位置数据 */    //需要修改
 typedef struct
 {
-	float x;
-	float y;
-	float z;
-	float yaw;
+	float x; 
+	float y; 
+	float angle;
 } ext_game_robot_pos_t;
 
 /* ID: 0x0204  Byte:  6    机器人增益数据 */  //需要修改
 typedef struct
 {
 	uint8_t recovery_buff; 
-	uint8_t cooling_buff; 
+	uint16_t cooling_buff; 
 	uint8_t defence_buff; 
 	uint8_t vulnerability_buff; 
 	uint16_t attack_buff; 
-	uint8_t remaining_energy; 
+	uint8_t remaining_energy;
 } ext_buff_musk_t;
 
 /* ID: 0x0205  Byte:  2    空中机器人能量状态数据 */
@@ -235,7 +239,7 @@ typedef struct
   uint16_t projectile_allowance_42mm;  
   uint16_t remaining_gold_coin; 
   uint16_t projectile_allowance_fortress; 
-}__attribute__((packed)) projectile_allowance_t; 
+} projectile_allowance_t; 
 
 
 
@@ -261,14 +265,14 @@ typedef struct
 { 
     uint32_t rfid_status;  
     uint8_t rfid_status_2; 
-} __attribute__((packed)) rfid_status_t;
+} rfid_status_t;
 
 /* ID: 0x020D  Byte:  6    哨兵自主决策信息同步 */
 typedef struct 
 {  
 	uint32_t sentry_info; 
   	uint16_t sentry_info_2; 
-}  __attribute__((packed)) sentry_info_t; 
+}  sentry_info_t; 
 
 
 
