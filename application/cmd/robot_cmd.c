@@ -425,7 +425,7 @@ static void RemoteControlSet()
         if(vision_recv_data->cmd.data.tracking.tracking==1)
         {
 
-            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f-1.5f);    //right
+            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f);    //-right
             //对角度进行处理,保证连续性,适应反馈角度的计圈方式
             Sentry_Init_Yaw = gimbal_cmd_send.yaw=yaw_angle_deal(vision_yaw,-gimbal_fetch_data.gimbal_imu_data.YawTotalAngle);
             Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-18.5f);  //-up5 degrees compensation
@@ -436,8 +436,8 @@ static void RemoteControlSet()
             sentry_patrol(Sentry_Init_Pitch, Sentry_Init_Yaw); //哨兵巡查，传入初始pitch和yaw
         }
         
-        if(gimbal_cmd_send.pitch>=45.0f)gimbal_cmd_send.pitch=45.0f;
-        if(gimbal_cmd_send.pitch<=-45.0f)gimbal_cmd_send.pitch=-45.0f;
+        if(gimbal_cmd_send.pitch>=35.0f)gimbal_cmd_send.pitch=35.0f;
+        if(gimbal_cmd_send.pitch<=-35.0f)gimbal_cmd_send.pitch=-35.0f;
 
         //底盘
         chassis_cmd_send.vy = 1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vy; 

@@ -179,12 +179,12 @@ void ShootTask()
                 if(loader->measure.real_current>MAX_CURRENT)
                 {
                     DJIMotorEnable(loader);
-                    DJIMotorSetRef(loader,-9000);
+                    DJIMotorSetRef(loader,-10000);
                 } 
                 else
                 {
                     DJIMotorEnable(loader);
-                    DJIMotorSetRef(loader,9000);
+                    DJIMotorSetRef(loader,10000);
                 }
             }
             else
