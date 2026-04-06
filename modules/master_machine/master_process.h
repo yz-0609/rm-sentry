@@ -134,6 +134,9 @@ void VisionSetAltitude(float yaw, float pitch, float roll);
 void VisionSetAltitudeVel(float yaw_vel,float pitch_vel,float roll_vel);
 void VisionSetChassisVel(float vx,float vy,float wz);
 
+uint8_t VisionCmdHasNewFrame(void);
+uint32_t VisionCmdLastRxTimeMs(void);
+
 
 void UsbSendData(void);
 

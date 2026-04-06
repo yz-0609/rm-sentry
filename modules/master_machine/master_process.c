@@ -22,6 +22,8 @@
 static Vision_Recv_s recv_data;
 static Vision_Send_s send_data;
 static DaemonInstance *vision_daemon_instance;
+static volatile uint8_t vision_cmd_new_frame = 0;
+static volatile uint32_t vision_cmd_last_rx_time_ms = 0;
 
 #define USB_RX_DATA_SIZE 256  // byte
 #define USB_RECEIVE_LEN 150   // byte
@@ -114,6 +116,18 @@ void VisionSetChassisVel(float vx,float vy,float wz)
     send_data.vx = vx;
     send_data.vy = vy;
     send_data.wz = wz; 
+}
+
+uint8_t VisionCmdHasNewFrame(void)
+{
+    uint8_t has_new = vision_cmd_new_frame;
+    vision_cmd_new_frame = 0;
+    return has_new;
+}
+
+uint32_t VisionCmdLastRxTimeMs(void)
+{
+    return vision_cmd_last_rx_time_ms;
 }
 
 /**
@@ -445,18 +459,25 @@ void UsbSendData(void)
  */
 static void UsbReceiveData(uint16_t recv_len)
 {
-    // 在回调函数中，recv_len是实际接收到的数据长度
-    // vis_recv_buff已经包含了接收到的数据
-    UNUSED(recv_len);
+    if (recv_len > USB_RX_DATA_SIZE)
+    {
+        recv_len = USB_RX_DATA_SIZE;
+    }
+
+    // 仅解析本次回调真实收到的数据，避免读取缓冲区残留的旧内容
+    if (recv_len < HEADER_SIZE)
+    {
+        return;
+    }
     
     // 直接使用vis_recv_buff中的数据进行解析
     uint8_t * sof_address = vis_recv_buff;
-    uint8_t * rx_data_end_address = vis_recv_buff + USB_RECEIVE_LEN;
+    uint8_t * rx_data_end_address = vis_recv_buff + recv_len - 1;
     
     // 解析缓冲区中的所有数据包
     while (sof_address <= rx_data_end_address) {
         // 寻找帧头位置
-        while (*(sof_address) != RECEIVE_SOF && (sof_address <= rx_data_end_address)) {
+        while ((sof_address <= rx_data_end_address) && (*(sof_address) != RECEIVE_SOF)) {
             sof_address++;
         }
         // 判断是否超出接收数据范围
@@ -468,22 +489,43 @@ static void UsbReceiveData(uint16_t recv_len)
         if (crc8_ok) {
             uint8_t data_len = sof_address[1];
             uint8_t data_id = sof_address[2];
+            uint16_t packet_len = (uint16_t)(HEADER_SIZE + data_len + 2);
+
+            if ((uint32_t)(rx_data_end_address - sof_address + 1) < packet_len)
+            {
+                break;
+            }
+
             // 检查整包CRC16校验 4: header size, 2: crc16 size
-            bool crc16_ok = verify_CRC16_check_sum(sof_address, 4 + data_len + 2);
+            bool crc16_ok = verify_CRC16_check_sum(sof_address, packet_len);
             if (crc16_ok) {
                 switch (data_id) {
                     case ROBOT_CMD_DATA_RECEIVE_ID: {    //视觉端
-                        // memcpy(&RECEIVE_ROBOT_CMD_DATA, sof_address, sizeof(ReceiveDataRobotCmd_s));
-                        memcpy(&recv_data.cmd, sof_address, sizeof(ReceiveDataRobotCmd_s));
+                        if (packet_len >= sizeof(ReceiveDataRobotCmd_s))
+                        {
+                            memcpy(&recv_data.cmd, sof_address, sizeof(ReceiveDataRobotCmd_s));
+                            vision_cmd_last_rx_time_ms = DWT_GetTimeline_ms();
+                            vision_cmd_new_frame = 1;
+                            DaemonReload(vision_daemon_instance);
+                        }
                     } break;
                     case PID_DEBUG_DATA_RECEIVE_ID: {
-                        memcpy(&RECEIVE_PID_DEBUG_DATA, sof_address, sizeof(ReceiveDataPidDebug_s));
+                        if (packet_len >= sizeof(ReceiveDataPidDebug_s))
+                        {
+                            memcpy(&RECEIVE_PID_DEBUG_DATA, sof_address, sizeof(ReceiveDataPidDebug_s));
+                        }
                     } break;
                     case VIRTUAL_RC_DATA_RECEIVE_ID: {
-                        memcpy(&RECEIVE_VIRTUAL_RC_DATA, sof_address, sizeof(ReceiveDataVirtualRc_s));
+                        if (packet_len >= sizeof(ReceiveDataVirtualRc_s))
+                        {
+                            memcpy(&RECEIVE_VIRTUAL_RC_DATA, sof_address, sizeof(ReceiveDataVirtualRc_s));
+                        }
                     } break;
                     case SENTRYCMD_ID: {
-                        memcpy(&recv_data.Sentry_Cmd, sof_address, sizeof(sentrycmd_t));
+                        if (packet_len >= sizeof(FrameHeader_t) + sizeof(uint32_t) + sizeof(sentrycmd_t) + sizeof(uint16_t))
+                        {
+                            memcpy(&recv_data.Sentry_Cmd, sof_address + sizeof(FrameHeader_t) + sizeof(uint32_t), sizeof(sentrycmd_t));
+                        }
                     } break;
                     default:
                         break;
@@ -493,7 +535,7 @@ static void UsbReceiveData(uint16_t recv_len)
                     RECEIVE_TIME = DWT_GetTimeline_ms();
                 }
             }
-            sof_address += (data_len + HEADER_SIZE + 2);
+            sof_address += packet_len;
         } else {
             sof_address++;
         }

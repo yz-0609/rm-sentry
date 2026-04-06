@@ -9,6 +9,10 @@
 #include "general_def.h"
 #include "dji_motor.h"
 #include "bmi088.h"
+#include "rm_referee.h"
+#include "referee_task.h"
+
+
 // bsp
 #include "bsp_dwt.h"
 #include "bsp_log.h"
@@ -18,9 +22,11 @@
 #define PTICH_HORIZON_ANGLE (PITCH_HORIZON_ECD * ECD_ANGLE_COEF_DJI) // pitch水平时电机的角度,0-360
 
 
-#define PITCH_MIN   (-25.0f)
-#define PITCH_MAX   (25.0f)
-#define PITCH_STEP  (0.30f)   // 每周期变化量，决定速度
+#define PITCH_MIN   (-5.0f)
+#define PITCH_MAX   (20.0f)
+#define PITCH_STEP  (0.35f)   // 每周期变化量，决定速度
+
+
 
 
 
@@ -69,11 +75,41 @@ BMI088_Data_t bmi088_data;
 static uint8_t vision_flag=0;
 static int32_t yaw_round;
 
+
+referee_info_t* refer_CMD_data; //裁判系统数据指针,初始化时返回
+
 //哨兵模式pitch
 static float pitch_target,yaw_target;
 static int pitch_dir = 1;   // 1：向上，-1：向下
 static float Sentry_Init_Pitch,Sentry_Init_Yaw; //初始位置
 static uint8_t is_init = 0;      // 是否已记录初始位置
+
+
+static uint8_t left_flag=0;
+static uint8_t right_flag=0;
+
+static uint32_t last_vision_cmd_rx_time_ms = 0;
+
+#define VISION_CMD_TIMEOUT_MS (120u)
+
+static uint8_t VisionCmdIsOnline(void)
+{
+    uint32_t now_ms = DWT_GetTimeline_ms();
+
+    if (VisionCmdHasNewFrame())
+    {
+        last_vision_cmd_rx_time_ms = VisionCmdLastRxTimeMs();
+    }
+
+    if (last_vision_cmd_rx_time_ms == 0)
+    {
+        return 0;
+    }
+
+    return (uint8_t)((uint32_t)(now_ms - last_vision_cmd_rx_time_ms) <= VISION_CMD_TIMEOUT_MS);
+}
+
+
 
 /**
  * @brief 将任意角度归一化到[-180,180)
@@ -156,7 +192,7 @@ void RobotCMDInit()
     //bmi088_test = BMI088Register(&bmi088_config);
     rc_data = RemoteControlInit(&huart3);   // 修改为对应串口,注意如果是自研板dbus协议串口需选用添加了反相器的那个
     vision_recv_data = VisionInit(&huart1); // 视觉通信串口
-
+    refer_CMD_data=GetRefereeInfo();
 
     gimbal_cmd_pub = PubRegister("gimbal_cmd", sizeof(Gimbal_Ctrl_Cmd_s));
     gimbal_feed_sub = SubRegister("gimbal_feed", sizeof(Gimbal_Upload_Data_s));
@@ -245,15 +281,15 @@ static void sentry_patrol(float init_pitch, float init_yaw)
         pitch_target = PITCH_MIN;
         pitch_dir = 1;
     }
-
-    yaw_target+=0.5f;
-
+    if(refer_CMD_data->GameRobotState.current_HP!=0)
+    {
+        yaw_target+=0.4f;
+    }
     gimbal_cmd_send.pitch = pitch_target;
     gimbal_cmd_send.yaw = yaw_target;
 
 
 }
-
 
 
 
@@ -263,6 +299,8 @@ static void sentry_patrol(float init_pitch, float init_yaw)
  */
 static void RemoteControlSet()
 {
+
+    uint8_t vision_cmd_online = VisionCmdIsOnline();
 
 
 
@@ -286,6 +324,7 @@ static void RemoteControlSet()
         chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
         // chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+        chassis_cmd_send.mode=1;
     }
     else if (switch_is_down(rc_data[TEMP].rc.switch_right)) 
     {
@@ -411,7 +450,274 @@ static void RemoteControlSet()
 
     
 
+    //左摇杆
+    if(switch_is_mid(rc_data[TEMP].rc.switch_left))
+    {
+        left_flag=2;
+    }
+    else if(switch_is_up(rc_data[TEMP].rc.switch_left))
+    {
+        left_flag=3;
+    }
+    else if(switch_is_down(rc_data[TEMP].rc.switch_left))
+    {
+        left_flag=1;
+    }
 
+
+
+    //右摇杆
+    if(switch_is_mid(rc_data[TEMP].rc.switch_right))
+    {
+        right_flag=2;
+    }
+    else if (switch_is_up(rc_data[TEMP].rc.switch_right))
+    {
+        right_flag=3;       
+    }
+    else if(switch_is_down(rc_data[TEMP].rc.switch_right))
+    {
+        right_flag=1;
+    }
+
+
+
+    //模式选择
+
+    //-----------比赛模式------------//
+    if(left_flag==2&&right_flag==1)
+    {
+
+        if (!vision_cmd_online)
+        {
+            gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+            chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+            chassis_cmd_send.mode = 1;
+            chassis_cmd_send.vx = 0.0f;
+            chassis_cmd_send.vy = 0.0f;
+            chassis_cmd_send.chassis_spin_speed = 0.0f;
+            shoot_cmd_send.shoot_mode = SHOOT_OFF;
+            shoot_cmd_send.friction_mode = FRICTION_OFF;
+            shoot_cmd_send.load_mode = LOAD_STOP;
+            is_init = 0;
+            return;
+        }
+
+
+
+       //设置模式
+        shoot_cmd_send.shoot_mode=SHOOT_ON;
+        chassis_cmd_send.chassis_mode =CHASSIS_ROTATE;
+        chassis_cmd_send.mode=1;   //导航模式
+        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;  
+        shoot_cmd_send.load_mode = LOAD_STOP;
+        
+
+        //云台
+        if(vision_recv_data->cmd.data.tracking.tracking==1)
+        {
+            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f+0.65f);    //-right
+            //对角度进行处理,保证连续性,适应反馈角度的计圈方式
+            Sentry_Init_Yaw = gimbal_cmd_send.yaw=yaw_angle_deal(vision_yaw,-gimbal_fetch_data.gimbal_imu_data.YawTotalAngle);
+            Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-16.5f);  //-up5 degrees compensation
+            is_init = 0; // 确保丢失目标后，巡查模式能以最后记录的追踪位置为中心重新开始
+        }
+        else
+        {
+            sentry_patrol(Sentry_Init_Pitch, Sentry_Init_Yaw); //哨兵巡查，传入初始pitch和yaw
+        }
+        
+        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
+        if(gimbal_cmd_send.pitch<=-35.0f)gimbal_cmd_send.pitch=-35.0f;
+
+        //底盘
+        chassis_cmd_send.vy = 1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vy; 
+        chassis_cmd_send.vx = -1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vx;     
+        chassis_cmd_send.chassis_spin_speed = 2*(float)vision_recv_data->cmd.data.speed_vector.wz;
+        // chassis_cmd_send.chassis_spin_speed = 10.0f;
+
+
+
+        //摩擦轮
+        if(vision_recv_data->cmd.data.shoot.fric_on)
+        {
+            shoot_cmd_send.friction_mode = FRICTION_ON;
+        }
+        else
+        {
+            shoot_cmd_send.friction_mode = FRICTION_OFF;
+        }
+
+        //拨蛋轮
+        if(vision_recv_data->cmd.data.shoot.fire)
+        {
+            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
+        }
+        else
+        {
+            shoot_cmd_send.load_mode = LOAD_STOP;
+        }        
+    }
+    //-----------云台打弹模式------------//
+    else if(left_flag==3&&right_flag==3)
+    {
+
+        if (!vision_cmd_online)
+        {
+            gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
+            chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+            chassis_cmd_send.mode = 2;
+            chassis_cmd_send.vx = 0.0f;
+            chassis_cmd_send.vy = 0.0f;
+            chassis_cmd_send.chassis_spin_speed = 0.0f;
+            shoot_cmd_send.shoot_mode = SHOOT_OFF;
+            shoot_cmd_send.friction_mode = FRICTION_OFF;
+            shoot_cmd_send.load_mode = LOAD_STOP;
+            is_init = 0;
+            return;
+        }
+
+
+        shoot_cmd_send.shoot_mode=SHOOT_ON;
+        chassis_cmd_send.chassis_mode =CHASSIS_ROTATE;
+        chassis_cmd_send.mode=2;   
+        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;  
+        shoot_cmd_send.load_mode = LOAD_STOP;
+        //云台
+        if(vision_recv_data->cmd.data.tracking.tracking==1)
+        {
+            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f+0.65f);    //-right
+            //对角度进行处理,保证连续性,适应反馈角度的计圈方式
+            Sentry_Init_Yaw = gimbal_cmd_send.yaw=yaw_angle_deal(vision_yaw,-gimbal_fetch_data.gimbal_imu_data.YawTotalAngle);
+            Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-16.5f);  //-up5 degrees compensation
+            is_init = 0; // 确保丢失目标后，巡查模式能以最后记录的追踪位置为中心重新开始
+        }
+        else
+        {
+            sentry_patrol(Sentry_Init_Pitch, Sentry_Init_Yaw); //哨兵巡查，传入初始pitch和yaw
+        }
+        
+        if(gimbal_cmd_send.pitch>=35.0f)gimbal_cmd_send.pitch=35.0f;
+        if(gimbal_cmd_send.pitch<=-35.0f)gimbal_cmd_send.pitch=-35.0f;
+
+   
+        chassis_cmd_send.chassis_spin_speed = 10.0f;
+
+
+
+        //摩擦轮
+        if(vision_recv_data->cmd.data.shoot.fric_on)
+        {
+            shoot_cmd_send.friction_mode = FRICTION_ON;
+        }
+        else
+        {
+            shoot_cmd_send.friction_mode = FRICTION_OFF;
+        }
+
+        //拨蛋轮
+        if(vision_recv_data->cmd.data.shoot.fire)
+        {
+            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
+        }
+        else
+        {
+            shoot_cmd_send.load_mode = LOAD_STOP;
+        } 
+    }
+    //-----------移动模式--------------//
+    else if(left_flag==3&&right_flag==1)
+    {
+        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; 
+        chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
+        shoot_cmd_send.shoot_mode=SHOOT_OFF;
+
+        chassis_cmd_send.mode=2;
+   
+
+        chassis_cmd_send.vy = 7.0f * (float)rc_data[TEMP].rc.rocker_r_; 
+        chassis_cmd_send.vx = -7.0f * (float)rc_data[TEMP].rc.rocker_r1; 
+        gimbal_cmd_send.yaw += 0.0008f * (float)rc_data[TEMP].rc.rocker_l_;    
+        gimbal_cmd_send.pitch += 0.002f * (float)rc_data[TEMP].rc.rocker_l1;   //1
+        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
+        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;              
+    }
+
+
+    //-----------小陀螺模式------------//
+    else if(left_flag==3&&right_flag==2)
+    {
+        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; 
+        chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
+        shoot_cmd_send.shoot_mode=SHOOT_OFF;
+        chassis_cmd_send.chassis_spin_speed =14.0f;
+        chassis_cmd_send.mode=2;
+
+        chassis_cmd_send.vy = 7.0f * (float)rc_data[TEMP].rc.rocker_r_; 
+        chassis_cmd_send.vx = -7.0f * (float)rc_data[TEMP].rc.rocker_r1; 
+        gimbal_cmd_send.yaw += 0.0008f * (float)rc_data[TEMP].rc.rocker_l_;    
+        gimbal_cmd_send.pitch += 0.002f * (float)rc_data[TEMP].rc.rocker_l1;   //1
+        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
+        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;                      
+    }
+
+    //-----------摩擦轮单开模式------------//
+    else if(left_flag==1&&right_flag==2)
+    {
+        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; 
+        chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+        shoot_cmd_send.shoot_mode=SHOOT_ON;
+        shoot_cmd_send.friction_mode = FRICTION_ON;
+        shoot_cmd_send.load_mode = LOAD_STOP; 
+        chassis_cmd_send.mode=2;
+   
+
+        chassis_cmd_send.vy = 7.0f * (float)rc_data[TEMP].rc.rocker_r_; 
+        chassis_cmd_send.vx = -7.0f * (float)rc_data[TEMP].rc.rocker_r1; 
+        gimbal_cmd_send.yaw += 0.0008f * (float)rc_data[TEMP].rc.rocker_l_;    
+        gimbal_cmd_send.pitch += 0.002f * (float)rc_data[TEMP].rc.rocker_l1;   //1
+        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
+        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;           
+    }
+
+
+    //-----------打弹模式------------//
+    else if(left_flag==1&&right_flag==3)
+    {
+        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; 
+        chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
+        shoot_cmd_send.shoot_mode=SHOOT_ON;
+        shoot_cmd_send.friction_mode = FRICTION_ON;
+        shoot_cmd_send.load_mode = LOAD_BURSTFIRE; 
+        chassis_cmd_send.mode=2;
+   
+
+        chassis_cmd_send.vy = 7.0f * (float)rc_data[TEMP].rc.rocker_r_; 
+        chassis_cmd_send.vx = -7.0f * (float)rc_data[TEMP].rc.rocker_r1; 
+        gimbal_cmd_send.yaw += 0.0008f * (float)rc_data[TEMP].rc.rocker_l_;    
+        gimbal_cmd_send.pitch += 0.002f * (float)rc_data[TEMP].rc.rocker_l1;   //1
+        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
+        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;    
+    }
+
+
+    //-----------无力模式------------//
+    else if(left_flag==1&&right_flag==1)   
+    {
+        shoot_cmd_send.shoot_mode=SHOOT_OFF;
+        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE; 
+        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;         
+    }
+
+
+
+
+
+
+
+
+
+    /*
     //最终模式
     if(switch_is_mid(rc_data[TEMP].rc.switch_left))
     {    
@@ -421,14 +727,16 @@ static void RemoteControlSet()
         chassis_cmd_send.mode=1;   //导航模式
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;  
         shoot_cmd_send.load_mode = LOAD_STOP;
+        
 
+        //云台
         if(vision_recv_data->cmd.data.tracking.tracking==1)
         {
 
-            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f);    //-right
+            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f+0.65f);    //-right
             //对角度进行处理,保证连续性,适应反馈角度的计圈方式
             Sentry_Init_Yaw = gimbal_cmd_send.yaw=yaw_angle_deal(vision_yaw,-gimbal_fetch_data.gimbal_imu_data.YawTotalAngle);
-            Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-18.5f);  //-up5 degrees compensation
+            Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-16.5f);  //-up5 degrees compensation
             is_init = 0; // 确保丢失目标后，巡查模式能以最后记录的追踪位置为中心重新开始
         }
         else
@@ -472,6 +780,7 @@ static void RemoteControlSet()
         gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; 
         chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
         chassis_cmd_send.mode=2;
+   
 
         chassis_cmd_send.vy = 8.0f * (float)rc_data[TEMP].rc.rocker_r_; 
         chassis_cmd_send.vx = -8.0f * (float)rc_data[TEMP].rc.rocker_r1; 
@@ -485,11 +794,33 @@ static void RemoteControlSet()
     {
         shoot_cmd_send.shoot_mode=SHOOT_OFF;
         chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE; 
-        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;        
+        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE; 
+
     }
 
 
+    //右摇杆
 
+    if(switch_is_mid(rc_data[TEMP].rc.switch_right))
+    {
+        shoot_cmd_send.shoot_mode=SHOOT_ON;
+        shoot_cmd_send.friction_mode = FRICTION_ON;
+        shoot_cmd_send.load_mode = LOAD_STOP; 
+      
+    }
+
+    else if(switch_is_up(rc_data[TEMP].rc.switch_right))
+    {
+        shoot_cmd_send.shoot_mode=SHOOT_ON;
+        shoot_cmd_send.friction_mode = FRICTION_ON;
+        shoot_cmd_send.load_mode = LOAD_BURSTFIRE; 
+     
+    }
+
+    else if(switch_is_down(rc_data[TEMP].rc.switch_right))
+    {
+
+    }
 
 
     /******************************************************************************************/

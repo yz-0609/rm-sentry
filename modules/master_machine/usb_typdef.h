@@ -128,7 +128,7 @@ typedef struct
 
 
 typedef struct {
-  uint32_t sentry_cmd;  // bit 0-31
+  uint8_t sentry_cmd;  // bit 0-31
 } sentrycmd_t;
 
 
