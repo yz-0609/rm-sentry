@@ -173,8 +173,8 @@ void ShootTask()
         }
         if(shoot_cmd_recv.load_mode==LOAD_BURSTFIRE)
         {
-            if(shoot_check())
-            {
+            // if(shoot_check())
+            // {
                 //简单堵转逻辑
                 if(loader->measure.real_current>MAX_CURRENT)
                 {
@@ -186,11 +186,11 @@ void ShootTask()
                     DJIMotorEnable(loader);
                     DJIMotorSetRef(loader,10000);
                 }
-            }
-            else
-            {
-                DJIMotorStop(loader);
-            }
+            // }
+            // else
+            // {
+            //     DJIMotorStop(loader);
+            // }
 
         }
 

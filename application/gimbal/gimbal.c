@@ -33,7 +33,7 @@ attitude_t* get_IMU_data(void)
 }
 
 
-
+//1111
 void GimbalInit()
 {   
     gimba_IMU_data = INS_Init(); // IMU先初始化,获取姿态数据指针赋给yaw电机的其他数据来源

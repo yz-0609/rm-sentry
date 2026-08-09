@@ -15,6 +15,7 @@
         "bsp_log.h": "c",
         "robot.h": "c"
     },
+    "C_Cpp.default.configurationProvider": "",
     "makefile.makePath": "mingw32-make",
     "cortex-debug.armToolchainPath": "C:\\msys64\\mingw64\\bin",
     "cortex-debug.openocdPath": "C:\\msys64\\mingw64\\bin\\openocd.exe",
