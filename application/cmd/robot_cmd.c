@@ -24,18 +24,7 @@
 
 #define PITCH_MIN   (-5.0f)
 #define PITCH_MAX   (20.0f)
-#define PITCH_STEP  (0.35f)   // 每周期变化量，决定速度
-
-
-
-
-
-#define SENTRY_ATTACK      1
-#define SENTRY_DEFENCE     2
-#define SENTRY_MOVE        3
-
-
-
+#define PITCH_STEP  (0.15f)   // 每周期变化量，决定速度    0.35
 
 
 
@@ -69,14 +58,12 @@ static Shoot_Upload_Data_s shoot_fetch_data; // 从发射获取的反馈信息
 
 static Robot_Status_e robot_state; // 机器人整体工作状态
 
-BMI088Instance *bmi088_test; // 云台IMU
-BMI088_Data_t bmi088_data;
 
-static uint8_t vision_flag=0;
-static int32_t yaw_round;
 
 
 referee_info_t* refer_CMD_data; //裁判系统数据指针,初始化时返回
+
+
 
 //哨兵模式pitch
 static float pitch_target,yaw_target;
@@ -84,6 +71,8 @@ static int pitch_dir = 1;   // 1：向上，-1：向下
 static float Sentry_Init_Pitch,Sentry_Init_Yaw; //初始位置
 static uint8_t is_init = 0;      // 是否已记录初始位置
 
+
+// 机器人控制模式枚举
 typedef enum
 {
     ROBOT_CONTROL_MODE_SAFE = 0,
@@ -96,10 +85,17 @@ typedef enum
     ROBOT_CONTROL_MODE_ZERO_FORCE,
 } RobotControlMode_e;
 
-static RobotControlMode_e current_control_mode = ROBOT_CONTROL_MODE_SAFE;
-static uint8_t gimbal_feedback_valid = 0;
-static uint8_t gimbal_realign_required = 1;
 
+
+
+static RobotControlMode_e current_control_mode = ROBOT_CONTROL_MODE_SAFE;  // 当前机器人控制模式
+static uint8_t gimbal_feedback_valid = 0;                                  // 云台反馈数据是否有效的标志位
+static uint8_t gimbal_yaw_realign_required = 1;                            // 云台yaw目标是否需要重新对齐的标志位
+
+
+
+/*******************************************************************************************/
+// 视觉命令离线检测
 static uint32_t last_vision_cmd_rx_time_ms = 0;
 
 #define VISION_CMD_TIMEOUT_MS (120u)
@@ -120,9 +116,14 @@ static uint8_t VisionCmdIsOnline(void)
 
     return (uint8_t)((uint32_t)(now_ms - last_vision_cmd_rx_time_ms) <= VISION_CMD_TIMEOUT_MS);
 }
+/*******************************************************************************************/
 
 
 
+
+
+
+/*******************************************************************************************/
 /**
  * @brief 将任意角度归一化到[-180,180)
  */
@@ -155,7 +156,7 @@ static float NormalizeTo180_Fmod(float angle_deg)
 
     return res;
 }
-
+/*******************************************************************************************/
 
 
 
@@ -272,6 +273,10 @@ static float yaw_angle_deal(float target_angle,float ref_angle)
 
 
 
+
+
+
+/*******************************************************************************************/
 //哨兵巡查
 static void sentry_patrol(float init_pitch, float init_yaw)
 {
@@ -302,6 +307,16 @@ static void sentry_patrol(float init_pitch, float init_yaw)
 
 
 }
+/*******************************************************************************************/
+
+
+
+
+
+
+
+
+/*******************************************************************************************/
 
 /**
  * @brief 根据遥控器左右三段开关的组合解析机器人控制模式
@@ -310,7 +325,7 @@ static void sentry_patrol(float init_pitch, float init_yaw)
  * @param right_switch 遥控器右侧三段开关原始值
  * @return RobotControlMode_e 解析得到的控制模式；组合无效时返回安全模式
  */
-static RobotControlMode_e DecodeRobotMode(uint16_t left_switch, uint16_t right_switch)
+static RobotControlMode_e robot_mode_choose(uint16_t left_switch, uint16_t right_switch)
 {
     switch (left_switch)
     {
@@ -355,13 +370,24 @@ static RobotControlMode_e DecodeRobotMode(uint16_t left_switch, uint16_t right_s
         return ROBOT_CONTROL_MODE_SAFE;
     }
 }
+/*******************************************************************************************/
 
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 /**
  * @brief 将本周期各执行机构命令重置为安全默认值
  *
  * @note 该函数不会清零云台yaw和pitch目标，以保持正常模式下的角度连续性。
  */
-static void ResetModeOutputs(void)
+static void reset_control_outputs(void)
 {
     chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
     chassis_cmd_send.mode = 2;
@@ -383,31 +409,31 @@ static void ResetModeOutputs(void)
  * @param mode 待判断的机器人控制模式
  * @return uint8_t 返回1表示云台应保持零力，返回0表示云台可以进入工作状态
  */
-static uint8_t RobotModeDisablesGimbal(RobotControlMode_e mode)
+static uint8_t judge_zero_force_mode(RobotControlMode_e mode)
 {
     return (uint8_t)(mode == ROBOT_CONTROL_MODE_SAFE ||
                      mode == ROBOT_CONTROL_MODE_ZERO_FORCE);
 }
 
 /**
- * @brief 标记云台在下次恢复工作前需要重新对齐目标角度
+ * @brief 标记云台在下次恢复工作前需要重新对齐yaw目标角度
  *
  * @note 进入安全、无力或急停状态时调用，同时重置哨兵巡查初始化状态。
  */
-static void MarkGimbalRealignRequired(void)
+static void MarkGimbalYawRealignRequired(void)
 {
-    gimbal_realign_required = 1;
+    gimbal_yaw_realign_required = 1;
     is_init = 0;
     pitch_dir = 1;
 }
 
 /**
- * @brief 将云台控制目标和巡查中心同步到最新IMU反馈角度
+ * @brief 将云台yaw控制目标和巡查中心同步到最新IMU反馈角度
  *
  * @return uint8_t 返回1表示同步成功，返回0表示尚未收到有效云台反馈
- * @note yaw和pitch电机均配置为反向控制，因此控制目标使用IMU反馈角度的相反数。
+ * @note yaw电机配置为反向控制，因此控制目标使用IMU反馈角度的相反数；pitch目标保持不变。
  */
-static uint8_t SyncGimbalTargetToFeedback(void)
+static uint8_t zero_force_feedback(void)
 {
     if (!gimbal_feedback_valid)
     {
@@ -415,12 +441,9 @@ static uint8_t SyncGimbalTargetToFeedback(void)
     }
 
     gimbal_cmd_send.yaw = -gimbal_fetch_data.gimbal_imu_data.YawTotalAngle;
-    gimbal_cmd_send.pitch = -gimbal_fetch_data.gimbal_imu_data.Pitch;
 
     Sentry_Init_Yaw = gimbal_cmd_send.yaw;
-    Sentry_Init_Pitch = gimbal_cmd_send.pitch;
     yaw_target = gimbal_cmd_send.yaw;
-    pitch_target = gimbal_cmd_send.pitch;
     is_init = 0;
     pitch_dir = 1;
 
@@ -432,16 +455,18 @@ static uint8_t SyncGimbalTargetToFeedback(void)
  *
  * @param next_mode 下一周期需要运行的控制模式
  */
-static void TransitionRobotMode(RobotControlMode_e next_mode)
+static void robot_mode_transition(RobotControlMode_e next_mode)
 {
     if (current_control_mode == next_mode)
     {
         return;
     }
 
-    if (RobotModeDisablesGimbal(next_mode))
+    if (judge_zero_force_mode(next_mode))
     {
-        MarkGimbalRealignRequired();
+        gimbal_yaw_realign_required = 1;
+        is_init = 0;
+        pitch_dir = 1;
     }
     else
     {
@@ -458,19 +483,37 @@ static void TransitionRobotMode(RobotControlMode_e next_mode)
  *
  * @param chassis_coordinate_mode 底盘坐标变换模式，比赛模式使用1，其他模式使用2
  */
-static void ApplyVisionOfflineMode(uint8_t chassis_coordinate_mode)
+static void vision_off_deal(uint8_t chassis_coordinate_mode)
 {
     gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
     chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
     chassis_cmd_send.mode = chassis_coordinate_mode;
+    chassis_cmd_send.vx = 0.0f;
+    chassis_cmd_send.vy = 0.0f;
+    chassis_cmd_send.chassis_spin_speed = 0.0f;
+    shoot_cmd_send.shoot_mode = SHOOT_OFF;
+    shoot_cmd_send.friction_mode = FRICTION_OFF;
+    shoot_cmd_send.load_mode = LOAD_STOP;
     is_init = 0;
     pitch_dir = 1;
 }
+/***************************************************************************************************/
 
+
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 /**
  * @brief 根据遥控器摇杆输入更新手动底盘速度和云台目标角度
  */
-static void UpdateManualDriveAndGimbal(void)
+static void UpdateRCInput(void)
 {
     chassis_cmd_send.vy = 7.0f * (float)rc_data[TEMP].rc.rocker_r_;
     chassis_cmd_send.vx = -7.0f * (float)rc_data[TEMP].rc.rocker_r1;
@@ -501,7 +544,7 @@ static void UpdateVisionGimbal(float pitch_max, float pitch_min)
         float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw * 180.0f / 3.14515926f + 0.65f); //-right
         //对角度进行处理,保证连续性,适应反馈角度的计圈方式
         Sentry_Init_Yaw = gimbal_cmd_send.yaw = yaw_angle_deal(vision_yaw, -gimbal_fetch_data.gimbal_imu_data.YawTotalAngle);
-        Sentry_Init_Pitch = gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch * 180.0f / 3.14515926f - 16.5f); //-up5 degrees compensation
+        Sentry_Init_Pitch = gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch * 180.0f / 3.14515926f - 16.5f); //-up16.5 degrees compensation
         is_init = 0; // 确保丢失目标后，巡查模式能以最后记录的追踪位置为中心重新开始
     }
     else
@@ -544,7 +587,18 @@ static void UpdateVisionShooter(void)
         shoot_cmd_send.load_mode = LOAD_STOP;
     }
 }
+/***************************************************************************************************/
 
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 //-----------比赛模式------------//
 /**
  * @brief 运行比赛模式，使用视觉控制导航、云台和发射机构
@@ -555,7 +609,7 @@ static void RunCompetitionMode(uint8_t vision_cmd_online)
 {
     if (!vision_cmd_online)
     {
-        ApplyVisionOfflineMode(1);
+        vision_off_deal(1);
         return;
     }
 
@@ -569,9 +623,11 @@ static void RunCompetitionMode(uint8_t vision_cmd_online)
     UpdateVisionGimbal(25.0f, -35.0f);
 
     //底盘
-    chassis_cmd_send.vy = 1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vy;
-    chassis_cmd_send.vx = -1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vx;
+    chassis_cmd_send.vy = 1400.0f * (float)vision_recv_data->cmd.data.speed_vector.vy;    //1300
+    chassis_cmd_send.vx = -1400.0f * (float)vision_recv_data->cmd.data.speed_vector.vx;
     chassis_cmd_send.chassis_spin_speed = 2 * (float)vision_recv_data->cmd.data.speed_vector.wz;
+    // chassis_cmd_send.chassis_spin_speed = 0.0f;
+
     // chassis_cmd_send.chassis_spin_speed = 10.0f;
 
     UpdateVisionShooter();
@@ -587,7 +643,7 @@ static void RunGimbalFireMode(uint8_t vision_cmd_online)
 {
     if (!vision_cmd_online)
     {
-        ApplyVisionOfflineMode(2);
+        vision_off_deal(2);
         return;
     }
 
@@ -612,7 +668,7 @@ static void RunMoveMode(void)
     chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
     shoot_cmd_send.shoot_mode = SHOOT_OFF;
     chassis_cmd_send.mode = 2;
-    UpdateManualDriveAndGimbal();
+    UpdateRCInput();
 }
 
 //-----------小陀螺模式------------//
@@ -626,7 +682,7 @@ static void RunSpinMode(void)
     shoot_cmd_send.shoot_mode = SHOOT_OFF;
     chassis_cmd_send.chassis_spin_speed = 14.0f;
     chassis_cmd_send.mode = 2;
-    UpdateManualDriveAndGimbal();
+    UpdateRCInput();
 }
 
 //-----------摩擦轮单开模式------------//
@@ -641,7 +697,7 @@ static void RunFrictionOnlyMode(void)
     shoot_cmd_send.friction_mode = FRICTION_ON;
     shoot_cmd_send.load_mode = LOAD_STOP;
     chassis_cmd_send.mode = 2;
-    UpdateManualDriveAndGimbal();
+    UpdateRCInput();
 }
 
 //-----------打弹模式------------//
@@ -656,9 +712,22 @@ static void RunFireMode(void)
     shoot_cmd_send.friction_mode = FRICTION_ON;
     shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
     chassis_cmd_send.mode = 2;
-    UpdateManualDriveAndGimbal();
+    UpdateRCInput();
 }
+/***************************************************************************************************/
 
+
+
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 /**
  * @brief 根据当前状态分发并运行对应的机器人控制模式
  *
@@ -690,15 +759,28 @@ static void RunRobotControlMode(RobotControlMode_e mode, uint8_t vision_cmd_onli
     case ROBOT_CONTROL_MODE_ZERO_FORCE:
     case ROBOT_CONTROL_MODE_SAFE:
     default:
-        // 安全默认输出已经由ResetModeOutputs()设置
+        // reset_control_outputs()设置
         break;
     }
 }
+/***************************************************************************************************/
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 /**
- * @brief 控制输入为遥控器(调试时)的模式和控制量设置  
+ * @brief 控制输入为遥控器(调试时)的模式和控制量设置
  *
  */
 static void RemoteControlSet()
@@ -707,381 +789,46 @@ static void RemoteControlSet()
     uint8_t vision_cmd_online = VisionCmdIsOnline();
 
 
-
-
-    /******************************************************************************************/
-    
-    /*
-
-    //遥控器运动模式
-    
-    //右摇杆
-    if (switch_is_up(rc_data[TEMP].rc.switch_right)) 
-    {
-        chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
-        chassis_cmd_send.chassis_spin_speed =14.0f;
-        chassis_cmd_send.mode=1; //小陀螺跟随模式底盘
-    }
-    else if (switch_is_mid(rc_data[TEMP].rc.switch_right)) 
-    {
-        chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;
-        // chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE;
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
-        chassis_cmd_send.mode=1;
-    }
-    else if (switch_is_down(rc_data[TEMP].rc.switch_right)) 
-    {
-        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE; 
-        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
-    }
-    //左摇杆
-    if(switch_is_up(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-        shoot_cmd_send.friction_mode = FRICTION_ON;
-        shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-    }
-    else if(switch_is_mid(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-        shoot_cmd_send.friction_mode = FRICTION_ON;
-        shoot_cmd_send.load_mode = LOAD_STOP; 
-    }
-    else if(switch_is_down(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_OFF; 
-    }
-    //控制值输入
-    if(!(switch_is_down(rc_data[TEMP].rc.switch_right)))
-    {
-        chassis_cmd_send.vy = 8.0f * (float)rc_data[TEMP].rc.rocker_r_; 
-        chassis_cmd_send.vx = 8.0f * (float)rc_data[TEMP].rc.rocker_r1; 
-        gimbal_cmd_send.yaw += 0.0008f * (float)rc_data[TEMP].rc.rocker_l_;    
-        gimbal_cmd_send.pitch += 0.002f * (float)rc_data[TEMP].rc.rocker_l1;   //1
-        // gimbal_cmd_send.pitch = 0.004f * (float)rc_data[TEMP].rc.rocker_l1;  
-        // //速度环调试指令
-        // gimbal_cmd_send.pitch = 0.003f * (float)rc_data[TEMP].rc.rocker_l1;   //rad/s
-        // gimbal_cmd_send.yaw = 0.3f * (float)rc_data[TEMP].rc.rocker_l_;  //rpm
-        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
-        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;        
-    } 
-
-    
-    
-    
-    /******************************************************************************************/
-
-
-
-
-    
-
-
-
-
-
-
-    /******************************************************************************************* */
-    
-    /*
-
-    //视觉调试模式
-    
-    //右摇杆
-    if (switch_is_up(rc_data[TEMP].rc.switch_right)) 
-    {
-        chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
-        chassis_cmd_send.chassis_spin_speed =12.0f;
-
-    }
-    else if (switch_is_mid(rc_data[TEMP].rc.switch_right)) 
-    {
-        chassis_cmd_send.chassis_mode = CHASSIS_NO_FOLLOW;   //不跟随可移动
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;
-    }
-    else if (switch_is_down(rc_data[TEMP].rc.switch_right)) 
-    {
-        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE; 
-        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;
-    }
-    //左摇杆
-    if(switch_is_mid(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-    }
-    else if(switch_is_down(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_OFF; 
-    }
-
-
-    if(!switch_is_down(rc_data[TEMP].rc.switch_right))
-    {
-        //控制值输入
-        chassis_cmd_send.vy = 8.0f * (float)rc_data[TEMP].rc.rocker_r_; 
-        chassis_cmd_send.vx = 8.0f * (float)rc_data[TEMP].rc.rocker_r1; 
-        gimbal_cmd_send.yaw = CalcContinuousYawTargetFromVision(vision_recv_data->cmd.data.gimbal.yaw);
-        gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-16.0f);  //-上
-        if(gimbal_cmd_send.pitch>=45.0f)gimbal_cmd_send.pitch=45.0f;
-        if(gimbal_cmd_send.pitch<=-45.0f)gimbal_cmd_send.pitch=-45.0f;
-
-        if(vision_recv_data->cmd.data.shoot.fric_on)
-        {
-            shoot_cmd_send.friction_mode = FRICTION_ON;
-        }
-        else
-        {
-            shoot_cmd_send.friction_mode = FRICTION_OFF;
-        }
-        if(vision_recv_data->cmd.data.shoot.fire)
-        {
-            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-        }
-        else
-        {
-            shoot_cmd_send.load_mode = LOAD_STOP;
-        }
-
-    }
-
-    
-    
-   
-
-    /******************************************************************************************/
-
-    
-
     //模式选择
-    RobotControlMode_e next_mode = DecodeRobotMode(rc_data[TEMP].rc.switch_left,
+    RobotControlMode_e next_mode = robot_mode_choose(rc_data[TEMP].rc.switch_left,
                                                    rc_data[TEMP].rc.switch_right);
-    TransitionRobotMode(next_mode);
-    ResetModeOutputs();
+    robot_mode_transition(next_mode);
+    reset_control_outputs();
 
-    // 急停期间冻结巡查和手动目标更新，恢复后再执行无扰对齐
+    // 急停期间冻结巡查和手动目标更新，恢复后再执行yaw无扰对齐
     if (robot_state == ROBOT_STOP)
     {
         return;
     }
 
-    if (!RobotModeDisablesGimbal(current_control_mode) && gimbal_realign_required)
+    if (!judge_zero_force_mode(current_control_mode) && gimbal_yaw_realign_required)
     {
-        if (!SyncGimbalTargetToFeedback())
+        if (!zero_force_feedback())
         {
             return;
         }
-        gimbal_realign_required = 0;
+        gimbal_yaw_realign_required = 0;
     }
 
     RunRobotControlMode(current_control_mode, vision_cmd_online);
 
 
 
-
-
-
-
-
-
-    /*
-    //最终模式
-    if(switch_is_mid(rc_data[TEMP].rc.switch_left))
-    {    
-        //设置模式
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-        chassis_cmd_send.chassis_mode =CHASSIS_ROTATE;
-        chassis_cmd_send.mode=1;   //导航模式
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;  
-        shoot_cmd_send.load_mode = LOAD_STOP;
-        
-
-        //云台
-        if(vision_recv_data->cmd.data.tracking.tracking==1)
-        {
-
-            float vision_yaw = -(vision_recv_data->cmd.data.gimbal.yaw*180.0f/3.14515926f+0.65f);    //-right
-            //对角度进行处理,保证连续性,适应反馈角度的计圈方式
-            Sentry_Init_Yaw = gimbal_cmd_send.yaw=yaw_angle_deal(vision_yaw,-gimbal_fetch_data.gimbal_imu_data.YawTotalAngle);
-            Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-16.5f);  //-up5 degrees compensation
-            is_init = 0; // 确保丢失目标后，巡查模式能以最后记录的追踪位置为中心重新开始
-        }
-        else
-        {
-            sentry_patrol(Sentry_Init_Pitch, Sentry_Init_Yaw); //哨兵巡查，传入初始pitch和yaw
-        }
-        
-        if(gimbal_cmd_send.pitch>=35.0f)gimbal_cmd_send.pitch=35.0f;
-        if(gimbal_cmd_send.pitch<=-35.0f)gimbal_cmd_send.pitch=-35.0f;
-
-        //底盘
-        chassis_cmd_send.vy = 1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vy; 
-        chassis_cmd_send.vx = -1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vx;     
-        chassis_cmd_send.chassis_spin_speed = 2*(float)vision_recv_data->cmd.data.speed_vector.wz;
-        // chassis_cmd_send.chassis_spin_speed = 10.0f;
-
-
-
-        //摩擦轮
-        if(vision_recv_data->cmd.data.shoot.fric_on)
-        {
-            shoot_cmd_send.friction_mode = FRICTION_ON;
-        }
-        else
-        {
-            shoot_cmd_send.friction_mode = FRICTION_OFF;
-        }
-
-        //拨蛋轮
-        if(vision_recv_data->cmd.data.shoot.fire)
-        {
-            shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-        }
-        else
-        {
-            shoot_cmd_send.load_mode = LOAD_STOP;
-        }
-    }
-    else if(switch_is_up(rc_data[TEMP].rc.switch_left))
-    {
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE; 
-        chassis_cmd_send.chassis_mode = CHASSIS_FOLLOW_GIMBAL_YAW;
-        chassis_cmd_send.mode=2;
-   
-
-        chassis_cmd_send.vy = 8.0f * (float)rc_data[TEMP].rc.rocker_r_; 
-        chassis_cmd_send.vx = -8.0f * (float)rc_data[TEMP].rc.rocker_r1; 
-        gimbal_cmd_send.yaw += 0.0008f * (float)rc_data[TEMP].rc.rocker_l_;    
-        gimbal_cmd_send.pitch += 0.002f * (float)rc_data[TEMP].rc.rocker_l1;   //1
-        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
-        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;        
-
-    }
-    else if(switch_is_down(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_OFF;
-        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE; 
-        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE; 
-
-    }
-
-
-    //右摇杆
-
-    if(switch_is_mid(rc_data[TEMP].rc.switch_right))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-        shoot_cmd_send.friction_mode = FRICTION_ON;
-        shoot_cmd_send.load_mode = LOAD_STOP; 
-      
-    }
-
-    else if(switch_is_up(rc_data[TEMP].rc.switch_right))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-        shoot_cmd_send.friction_mode = FRICTION_ON;
-        shoot_cmd_send.load_mode = LOAD_BURSTFIRE; 
-     
-    }
-
-    else if(switch_is_down(rc_data[TEMP].rc.switch_right))
-    {
-
-    }
-
-
-    /******************************************************************************************/
-    /*
-    
-    //哨兵调试模式
-    
-    //左摇杆
-    if(switch_is_mid(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_ON;
-        chassis_cmd_send.chassis_mode = CHASSIS_ROTATE;
-        gimbal_cmd_send.gimbal_mode = GIMBAL_GYRO_MODE;  
-        shoot_cmd_send.load_mode = LOAD_STOP;      
-
-        if(vision_recv_data->Sentry_Cmd.sentry_cmd==SENTRY_ATTACK)   //攻击（自瞄）模式
-        {
-            Sentry_Init_Yaw = gimbal_cmd_send.yaw = CalcContinuousYawTargetFromVision(vision_recv_data->cmd.data.gimbal.yaw);  //-右
-            Sentry_Init_Pitch=gimbal_cmd_send.pitch = -(vision_recv_data->cmd.data.gimbal.pitch*180.0f/3.14515926f-16.0f);  //-上5度补偿
-            if(vision_recv_data->cmd.data.shoot.fric_on)
-            {
-                shoot_cmd_send.friction_mode = FRICTION_ON;
-            }
-            else
-            {
-                shoot_cmd_send.friction_mode = FRICTION_OFF;
-            }
-            if(vision_recv_data->cmd.data.shoot.fire)
-            {
-                shoot_cmd_send.load_mode = LOAD_BURSTFIRE;
-            }
-            else
-            {
-                shoot_cmd_send.load_mode = LOAD_STOP;
-            }
-            is_init=0; //攻击模式每次进入都重新记录初始位置，保证巡查时以攻击模式进入时的位置为中心进行
-
-        }
-        else if(vision_recv_data->Sentry_Cmd.sentry_cmd==SENTRY_DEFENCE)  //巡查(防守)模式
-        {
-            sentry_patrol(Sentry_Init_Pitch, Sentry_Init_Yaw); //哨兵巡查，传入初始pitch和yaw
-        }
-        else if(vision_recv_data->Sentry_Cmd.sentry_cmd==SENTRY_MOVE)   //移动模式
-        {
-
-            gimbal_cmd_send.yaw = 0.0f;    
-            gimbal_cmd_send.pitch = 0.0f;
-        } 
-        else
-        {
-            gimbal_cmd_send.yaw = 0.0f;    
-            gimbal_cmd_send.pitch = 0.0f;
-        }  
-
-
-        //暂时遥控器输入x，y后续加入导航
-        // chassis_cmd_send.vy = 8.0f * (float)rc_data[TEMP].rc.rocker_r_; 
-        // chassis_cmd_send.vx = 8.0f * (float)rc_data[TEMP].rc.rocker_r1; 
-        // chassis_cmd_send.chassis_spin_speed =7.0f;
-
-
-        //导航控制
-        chassis_cmd_send.vy = 1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vy; 
-        chassis_cmd_send.vx = -1300.0f * (float)vision_recv_data->cmd.data.speed_vector.vx;     
-        chassis_cmd_send.chassis_spin_speed = 2*(float)vision_recv_data->cmd.data.speed_vector.wz;
-
-        if(gimbal_cmd_send.pitch>=25.0f)gimbal_cmd_send.pitch=25.0f;
-        if(gimbal_cmd_send.pitch<=-25.0f)gimbal_cmd_send.pitch=-25.0f;
-
-
-
-    }
-    else if(switch_is_down(rc_data[TEMP].rc.switch_left))
-    {
-        shoot_cmd_send.shoot_mode=SHOOT_OFF;
-        chassis_cmd_send.chassis_mode = CHASSIS_ZERO_FORCE; 
-        gimbal_cmd_send.gimbal_mode = GIMBAL_ZERO_FORCE;        
-    }
-
-    
-    
-    
-    
-    
-    /******************************************************************************************/
-
-
-
-
-
     
 }
+/***************************************************************************************************/
 
+
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 /**
  * @brief 输入为键鼠时模式和控制量设置
  *
@@ -1188,8 +935,8 @@ static void EmergencyHandler()
         return;
     }
 
-    MarkGimbalRealignRequired();
-    ResetModeOutputs();
+    MarkGimbalYawRealignRequired();
+    reset_control_outputs();
 
     // 遥控器右侧开关为[上],恢复正常运行
     if (!emergency_requested && switch_is_up(rc_data[TEMP].rc.switch_right))
@@ -1201,7 +948,21 @@ static void EmergencyHandler()
 
     LOGERROR("[CMD] emergency stop!");
 }
+/***************************************************************************************************/
 
+
+
+
+
+
+
+
+
+
+
+
+
+/***************************************************************************************************/
 /* 机器人核心控制任务,200Hz频率运行(必须高于视觉发送频率) */
 void RobotCMDTask()
 {
@@ -1220,10 +981,10 @@ void RobotCMDTask()
     }
 
     // 根据gimbal的反馈值计算云台和底盘正方向的夹角,不需要传参,通过static私有变量完成
-     CalcOffsetAngle();
+    CalcOffsetAngle();
     // 根据遥控器左侧开关,确定当前使用的控制模式为遥控器调试还是键鼠
     // if (switch_is_down(rc_data[TEMP].rc.switch_left)) // 遥控器左侧开关状态为[下],遥控器控制
-        RemoteControlSet();
+    RemoteControlSet();
 
     // else if (switch_is_up(rc_data[TEMP].rc.switch_left)) // 遥控器左侧开关状态为[上],键盘控制
     //     MouseKeySet();

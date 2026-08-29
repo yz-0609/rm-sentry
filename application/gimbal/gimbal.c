@@ -55,8 +55,8 @@ void GimbalInit()
                 .MaxOut = 400,
             },
             .speed_PID = {
-                .Kp = 1550,  // 1500
-                .Ki = 45, // 30  35
+                .Kp = 1550,  // 1550
+                .Ki = 45, // 45
                 .Kd = 0,
                 .Improve = PID_Integral_Limit | PID_Derivative_On_Measurement,//PID_Trapezoid_Intergral |PID_IMPROVE_NONE,// 
                 .IntegralLimit = 10000,
@@ -87,9 +87,9 @@ void GimbalInit()
         },
         .controller_param_init_config = {
             .angle_PID = {
-                .Kp = 800, // 2500   2000    2100   1.5
+                .Kp = 800, //800
                 .Ki = 50,
-                .Kd = 150,//120   450   120    0.5
+                .Kd = 150,//150
                 .Improve = PID_Trapezoid_Intergral | PID_Integral_Limit | PID_Derivative_On_Measurement,
                 .IntegralLimit = 200,
                 .MaxOut = 30000,
@@ -147,6 +147,7 @@ void GimbalTask()
     case GIMBAL_GYRO_MODE: // 后续只保留此模式
         DJIMotorEnable(yaw_motor);
         DJIMotorEnable(pitch_motor);
+        // DJIMotorStop(pitch_motor);
         DJIMotorChangeFeed(yaw_motor, ANGLE_LOOP, OTHER_FEED);
         DJIMotorChangeFeed(yaw_motor, SPEED_LOOP, OTHER_FEED);   
         DJIMotorChangeFeed(pitch_motor, ANGLE_LOOP, OTHER_FEED);
