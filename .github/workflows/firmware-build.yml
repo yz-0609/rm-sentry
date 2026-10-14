@@ -1,0 +1,50 @@
+name: Firmware Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: STM32F407 firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            make gcc-arm-none-eabi binutils-arm-none-eabi \
+            libnewlib-arm-none-eabi
+          arm-none-eabi-gcc --version
+
+      - name: Build default firmware
+        run: |
+          # The legacy source includes crc8_crc16.h, but its filename is CRC8_CRC16.h.
+          # Supply an alias outside the checkout for case-sensitive Linux builds.
+          compat_dir="$RUNNER_TEMP/sentry-compat"
+          mkdir -p "$compat_dir"
+          ln -s "$GITHUB_WORKSPACE/modules/master_machine/CRC8_CRC16.h" \
+            "$compat_dir/crc8_crc16.h"
+          printf 'C_INCLUDES += -I%s\n' "$compat_dir" > "$compat_dir/compat.mk"
+          make -j2 -f Makefile -f "$compat_dir/compat.mk"
+
+      - name: Verify firmware outputs
+        run: |
+          test -s build/basic_framework.elf
+          test -s build/basic_framework.hex
+          test -s build/basic_framework.bin
