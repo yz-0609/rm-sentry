@@ -40,6 +40,11 @@ jobs:
           mkdir -p "$compat_dir"
           ln -s "$GITHUB_WORKSPACE/modules/master_machine/CRC8_CRC16.h" \
             "$compat_dir/crc8_crc16.h"
+          # Ubuntu's ARM package omits this GCC-private header used by legacy code.
+          # Use the standard fixed-width integer definitions when it is unavailable.
+          if [ ! -f "$(arm-none-eabi-gcc -print-file-name=include)/stdint-gcc.h" ]; then
+            printf '#include <stdint.h>\n' > "$compat_dir/stdint-gcc.h"
+          fi
           printf 'C_INCLUDES += -I%s\n' "$compat_dir" > "$compat_dir/compat.mk"
           make -j2 -f Makefile -f "$compat_dir/compat.mk"
 
