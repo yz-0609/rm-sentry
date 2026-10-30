@@ -23,108 +23,148 @@
 static USARTInstance *referee_usart_instance; // 裁判系统串口实例
 static DaemonInstance *referee_daemon;		  // 裁判系统守护进程
 static referee_info_t referee_info;			  // 裁判系统数据
+static uint8_t referee_rx_cache[RE_RX_BUFFER_SIZE * 2u]; // 保存跨回调的半包
+static uint16_t referee_rx_used;
+
+/* 已支持命令的数据段长度，未知命令返回0，仅校验并跳过整帧 */
+static uint16_t JudgeDataLength(uint16_t cmd_id)
+{
+	switch (cmd_id)
+	{
+	case ID_game_state: return LEN_game_state;
+	case ID_game_result: return LEN_game_result;
+	case ID_game_robot_survivors: return LEN_game_robot_HP;
+	case ID_event_data: return LEN_event_data;
+	case ID_game_robot_state: return LEN_game_robot_state;
+	case ID_power_heat_data: return LEN_power_heat_data;
+	case ID_game_robot_pos: return LEN_game_robot_pos;
+	case ID_buff_musk: return LEN_buff_musk;
+	case ID_robot_hurt: return LEN_robot_hurt;
+	case ID_shoot_data: return LEN_shoot_data;
+	case ID_student_interactive: return LEN_receive_data;
+	case ID_RFID_status: return LEN_RFID_status;
+	case ID_ground_robot_pos: return LEN_ground_robot_pos;
+	case ID_projectile_allowance: return LEN_projectile_allowance;
+	case ID_sentry_decision: return LEN_sentry_decision;
+	default: return 0;
+	}
+}
 
 /**
- * @brief  读取裁判数据,中断中读取保证速度
- * @param  buff: 读取到的裁判系统原始数据
- * @retval 是否对正误判断做处理
- * @attention  在此判断帧头和CRC校验,无误再写入数据，不重复判断帧头
+ * @brief  缓存本次接收数据，循环解析完整帧，并保留未完成的半包
+ * @param  buff 本次接收到的裁判系统原始数据
+ * @param  recv_len 本次实际接收到的字节数
  */
-static void JudgeReadData(uint8_t *buff)
+static void JudgeReadData(uint8_t *buff, uint16_t recv_len)
 {
-	uint16_t judge_length; // 统计一帧数据长度
-	uint16_t data_length;       // 提取的数据段长度 (data部分)
-	uint16_t next_frame_offset; // 连包时下一帧的偏移量
+	uint16_t offset = 0;
 
-
-	if (buff == NULL)	   // 空数据包，则不作任何处理
+	if (buff == NULL || recv_len == 0 || recv_len > RE_RX_BUFFER_SIZE)
 		return;
 
-	// // 写入帧头数据(5-byte),用于判断是否开始存储裁判数据
-	// memcpy(&referee_info.FrameHeader, buff, LEN_HEADER);
+	if (recv_len > sizeof(referee_rx_cache) - referee_rx_used)
+		referee_rx_used = 0; // 防止异常状态导致追加越界
+	memcpy(referee_rx_cache + referee_rx_used, buff, recv_len);
+	referee_rx_used += recv_len;
 
-	// 判断帧头数据(0)是否为0xA5
-	if (buff[SOF] == REFEREE_SOF)
+	while (referee_rx_used - offset >= LEN_HEADER)
 	{
-		// 帧头CRC8校验
-		if (Verify_CRC8_Check_Sum(buff, LEN_HEADER) == TRUE)
+		uint8_t *frame = referee_rx_cache + offset;
+		uint16_t data_length;
+		uint16_t judge_length;
+		uint16_t cmd_id;
+		uint16_t expected_length;
+
+		if (frame[SOF] != REFEREE_SOF || Verify_CRC8_Check_Sum(frame, LEN_HEADER) != TRUE)
 		{
-			// 写入帧头数据(5-byte),用于判断是否开始存储裁判数据
-			memcpy(&referee_info.FrameHeader, buff, LEN_HEADER);
-			// 假设偏移量 DATA_LENGTH 为 1
-			data_length = (buff[2] << 8) | buff[1];
-			// 统计一帧数据长度(byte),用于CR16校验
-			judge_length = data_length + LEN_HEADER + LEN_CMDID + LEN_TAIL;
-			// judge_length = buff[DATA_LENGTH] + LEN_HEADER + LEN_CMDID + LEN_TAIL;
-			// 帧尾CRC16校验
-			if (Verify_CRC16_Check_Sum(buff, judge_length) == TRUE)
-			{
-				// 2个8位拼成16位int
-				referee_info.CmdID = (buff[6] << 8 | buff[5]);
-				// 解析数据命令码,将数据拷贝到相应结构体中(注意拷贝数据的长度)
-				// 第8个字节开始才是数据 data=7
-				switch (referee_info.CmdID)
-				{
-				case ID_game_state: // 0x0001   比赛状态数据，用到
-					memcpy(&referee_info.GameState, (buff + DATA_Offset), LEN_game_state);   
-					break;
-				case ID_game_result: // 0x0002  比赛结果数据
-					memcpy(&referee_info.GameResult, (buff + DATA_Offset), LEN_game_result);
-					break;
-				case ID_game_robot_survivors: // 0x0003   机器人血量数据，用到已修改
-					memcpy(&referee_info.GameRobotHP, (buff + DATA_Offset), LEN_game_robot_HP);
-					break;
-				case ID_event_data: // 0x0101   场地事件数据
-					memcpy(&referee_info.EventData, (buff + DATA_Offset), LEN_event_data);
-					break;
-				case ID_game_robot_state: // 0x0201    机器人性能体系数据
-					memcpy(&referee_info.GameRobotState, (buff + DATA_Offset), LEN_game_robot_state);
-					break;
-				case ID_power_heat_data: // 0x0202   实时底盘缓冲能量和射击热量数据
-					memcpy(&referee_info.PowerHeatData, (buff + DATA_Offset), LEN_power_heat_data);
-					break;
-				case ID_game_robot_pos: // 0x0203     机器人位置数据
-					memcpy(&referee_info.GameRobotPos, (buff + DATA_Offset), LEN_game_robot_pos);
-					break;
-				case ID_buff_musk: // 0x0204   机器人增益和底盘能量数据
-					memcpy(&referee_info.BuffMusk, (buff + DATA_Offset), LEN_buff_musk);
-					break;
-				case ID_robot_hurt: // 0x0206    伤害状态数据
-					memcpy(&referee_info.RobotHurt, (buff + DATA_Offset), LEN_robot_hurt);
-					break;
-				case ID_shoot_data: // 0x0207  实时射击数据
-					memcpy(&referee_info.ShootData, (buff + DATA_Offset), LEN_shoot_data);
-					break;
-				case ID_student_interactive: // 0x0301   syhtodo接收代码未测试
-					memcpy(&referee_info.ReceiveData, (buff + DATA_Offset), LEN_receive_data);
-					break;
-				case ID_RFID_status: // 0x209  RFID状态数据
-					memcpy(&referee_info.RFIDStatus, (buff + DATA_Offset), LEN_RFID_status);
-					break;
-				case ID_ground_robot_pos: // 0x20B  地面机器人位置数据
-					memcpy(&referee_info.GroundRobotPos, (buff + DATA_Offset), LEN_ground_robot_pos);
-					break;
-				case ID_projectile_allowance: // 0x208  允许发弹量数据
-					memcpy(&referee_info.ProjectileAllowance, (buff + DATA_Offset), LEN_projectile_allowance);
-					break;
-				case ID_sentry_decision: // 0x20D  哨兵自主决策信息同步
-					memcpy(&referee_info.SentryInfo, (buff + DATA_Offset), LEN_sentry_decision);
-					break;
-				}
-			}
+			++offset; // 杂字节或错误帧头，逐字节重新同步
+			continue;
 		}
-		// 计算下一帧的偏移量
-		next_frame_offset = LEN_HEADER + LEN_CMDID + data_length + LEN_TAIL;
-		// 首地址加帧长度,指向CRC16下一字节,用来判断是否为0xA5,从而判断一个数据包是否有多帧数据
-		if (buff[next_frame_offset] == REFEREE_SOF)
-		{ 
-			// 如果一个数据包出现多帧数据,则再次调用解析函数,直到所有数据包解析完毕
-			JudgeReadData(buff + next_frame_offset);
+
+		data_length = (uint16_t)frame[1] | ((uint16_t)frame[2] << 8);
+		// 先限制数据段长度，再做加法，避免异常长度越界或溢出
+		if (data_length > RE_RX_BUFFER_SIZE - LEN_HEADER - LEN_CMDID - LEN_TAIL)
+		{
+			++offset;
+			continue;
 		}
-		// if (*(buff + sizeof(xFrameHeader) + LEN_CMDID + referee_info.FrameHeader.DataLength + LEN_TAIL) == 0xA5)
-		// { // 如果一个数据包出现了多帧数据,则再次调用解析函数,直到所有数据包解析完毕
-		// 	JudgeReadData(buff + sizeof(xFrameHeader) + LEN_CMDID + referee_info.FrameHeader.DataLength + LEN_TAIL);
-		// }
+		if (referee_rx_used - offset < DATA_Offset)
+			break; // 命令码尚未收全
+
+		cmd_id = (uint16_t)frame[5] | ((uint16_t)frame[6] << 8);
+		expected_length = JudgeDataLength(cmd_id);
+		if (expected_length != 0 && data_length != expected_length)
+		{
+			++offset;
+			continue;
+		}
+
+		judge_length = data_length + LEN_HEADER + LEN_CMDID + LEN_TAIL;
+		if (referee_rx_used - offset < judge_length)
+			break; // 半包保留到下一次接收
+		if (Verify_CRC16_Check_Sum(frame, judge_length) != TRUE)
+		{
+			++offset;
+			continue;
+		}
+
+		memcpy(&referee_info.FrameHeader, frame, LEN_HEADER);
+		referee_info.CmdID = cmd_id;
+		switch (cmd_id)
+		{
+		case ID_game_state: // 0x0001 比赛状态数据
+			memcpy(&referee_info.GameState, frame + DATA_Offset, LEN_game_state);
+			break;
+		case ID_game_result: // 0x0002 比赛结果数据
+			memcpy(&referee_info.GameResult, frame + DATA_Offset, LEN_game_result);
+			break;
+		case ID_game_robot_survivors: // 0x0003 机器人血量数据
+			memcpy(&referee_info.GameRobotHP, frame + DATA_Offset, LEN_game_robot_HP);
+			break;
+		case ID_event_data: // 0x0101 场地事件数据
+			memcpy(&referee_info.EventData, frame + DATA_Offset, LEN_event_data);
+			break;
+		case ID_game_robot_state: // 0x0201 机器人性能体系数据
+			memcpy(&referee_info.GameRobotState, frame + DATA_Offset, LEN_game_robot_state);
+			break;
+		case ID_power_heat_data: // 0x0202 缓冲能量和射击热量
+			memcpy(&referee_info.PowerHeatData, frame + DATA_Offset, LEN_power_heat_data);
+			break;
+		case ID_game_robot_pos: // 0x0203 机器人位置数据
+			memcpy(&referee_info.GameRobotPos, frame + DATA_Offset, LEN_game_robot_pos);
+			break;
+		case ID_buff_musk: // 0x0204 机器人增益数据
+			memcpy(&referee_info.BuffMusk, frame + DATA_Offset, LEN_buff_musk);
+			break;
+		case ID_robot_hurt: // 0x0206 伤害状态数据
+			memcpy(&referee_info.RobotHurt, frame + DATA_Offset, LEN_robot_hurt);
+			break;
+		case ID_shoot_data: // 0x0207 实时射击数据
+			memcpy(&referee_info.ShootData, frame + DATA_Offset, LEN_shoot_data);
+			break;
+		case ID_student_interactive: // 0x0301 当前约定的5字节自定义内容
+			memcpy(&referee_info.ReceiveData, frame + DATA_Offset, LEN_receive_data);
+			break;
+		case ID_RFID_status: // 0x0209 RFID状态数据
+			memcpy(&referee_info.RFIDStatus, frame + DATA_Offset, LEN_RFID_status);
+			break;
+		case ID_ground_robot_pos: // 0x020B 地面机器人位置数据
+			memcpy(&referee_info.GroundRobotPos, frame + DATA_Offset, LEN_ground_robot_pos);
+			break;
+		case ID_projectile_allowance: // 0x0208 允许发弹量数据
+			memcpy(&referee_info.ProjectileAllowance, frame + DATA_Offset, LEN_projectile_allowance);
+			break;
+		case ID_sentry_decision: // 0x020D 哨兵自主决策信息同步
+			memcpy(&referee_info.SentryInfo, frame + DATA_Offset, LEN_sentry_decision);
+			break;
+		}
+		offset += judge_length;
+	}
+
+	if (offset != 0)
+	{
+		referee_rx_used -= offset;
+		memmove(referee_rx_cache, referee_rx_cache + offset, referee_rx_used);
 	}
 }
 
@@ -132,11 +172,12 @@ static void JudgeReadData(uint8_t *buff)
 static void RefereeRxCallback()
 {
 	DaemonReload(referee_daemon);
-	JudgeReadData(referee_usart_instance->recv_buff);
+	JudgeReadData(referee_usart_instance->recv_buff, referee_usart_instance->recv_len);
 }
 // 裁判系统丢失回调函数,重新初始化裁判系统串口
 static void RefereeLostCallback(void *arg)
 {
+	referee_rx_used = 0;
 	USARTServiceInit(referee_usart_instance);
 	LOGWARNING("[rm_ref] lost referee data");
 }

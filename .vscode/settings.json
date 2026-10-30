@@ -19,5 +19,14 @@
     "makefile.makePath": "mingw32-make",
     "cortex-debug.armToolchainPath": "C:\\msys64\\mingw64\\bin",
     "cortex-debug.openocdPath": "C:\\msys64\\mingw64\\bin\\openocd.exe",
-    "cortex-debug.JLinkGDBServerPath": "E:\\APP\\vscode\\jlink\\JLinkGDBServerCL.exe"
+    "cortex-debug.JLinkGDBServerPath": "E:\\APP\\vscode\\jlink\\JLinkGDBServerCL.exe",
+    "memory-view.trackDebuggers": [
+        "ozone",
+        "orbit"
+    ],
+    "mcu-debug.rtos-views.trackDebuggers": [
+        "ozone",
+        "orbit"
+    ],
+    "orbit.defaultProgram": "d:\\Users\\lenovo\\Desktop\\sentry\\sentry_code\\build\\basic_framework.elf"
 }

@@ -266,13 +266,13 @@ typedef struct
     uint32_t time_stamp;
     struct
     {
-        uint16_t ally_1_robot_HP;
-        uint16_t ally_2_robot_HP;
+        uint16_t ally_1_robot_HP; // RM2027己方重装血量
+        uint16_t ally_2_robot_HP; // RM2027保留槽，填0
         uint16_t ally_3_robot_HP;
         uint16_t ally_4_robot_HP;
         uint16_t reserved;
         uint16_t ally_7_robot_HP;
-        uint16_t ally_outpost_HP;
+        uint16_t ally_outpost_HP; // 开局己方一侧前哨血量
         uint16_t ally_base_HP;
     } __packed__ data;
     uint16_t crc;
@@ -299,7 +299,7 @@ typedef struct
     
     struct
     {
-        float hero_x;
+        float hero_x; // 兼容旧成员名，RM2027为己方重装坐标
         float hero_y;
 
         float engineer_x;
@@ -344,29 +344,11 @@ typedef struct
     FrameHeader_t frame_header;  // 数据段id = 0x0A
     uint32_t time_stamp;
 
-  struct
-  {
-    bool base_gain_point;                     // 己方基地增益点
-    bool circular_highland_gain_point;        // 己方环形高地增益点
-    bool enemy_circular_highland_gain_point;  // 对方环形高地增益点
-    bool friendly_r3_b3_gain_point;           // 己方 R3/B3 梯形高地增益点
-    bool enemy_r3_b3_gain_point;              // 对方 R3/B3 梯形高地增益点
-    bool friendly_r4_b4_gain_point;           // 己方 R4/B4 梯形高地增益点
-    bool enemy_r4_b4_gain_point;              // 对方 R4/B4 梯形高地增益点
-    bool energy_mechanism_gain_point;         // 己方能量机关激活点
-    bool friendly_fly_ramp_front_gain_point;  // 己方飞坡增益点（靠近己方一侧飞坡前）
-    bool friendly_fly_ramp_back_gain_point;  // 己方飞坡增益点（靠近己方一侧飞坡后）
-    bool enemy_fly_ramp_front_gain_point;  // 对方飞坡增益点（靠近对方一侧飞坡前）
-    bool enemy_fly_ramp_back_gain_point;   // 对方飞坡增益点（靠近对方一侧飞坡后）
-    bool friendly_outpost_gain_point;      // 己方前哨站增益点
-    bool friendly_healing_point;           // 己方补血点（检测到任一均视为激活）
-    bool friendly_sentry_patrol_area;      // 己方哨兵巡逻区
-    bool enemy_sentry_patrol_area;         // 对方哨兵巡逻区
-    bool friendly_big_resource_island;     // 己方大资源岛增益点
-    bool enemy_big_resource_island;        // 对方大资源岛增益点
-    bool friendly_exchange_area;           // 己方兑换区
-    bool center_gain_point;  // 中心增益点 RFID 卡状态（仅 RMUL 适用），1 为已检测到
-  } __attribute__((packed)) data;
+    struct
+    {
+        uint32_t rfid_status;   // RM2027 RFID状态位0～31，保留裁判系统原始位号
+        uint16_t rfid_status_2; // RM2027 RFID扩展状态位
+    } __packed__ data;
     uint16_t crc;            
 } __packed__ SendDataRfidStatus_s;
 
@@ -441,11 +423,10 @@ typedef struct
     struct
     {
         uint8_t recovery_buff;
-        uint8_t cooling_buff;
+        uint16_t cooling_buff;
         uint8_t defence_buff;
         uint8_t vulnerability_buff;
         uint16_t attack_buff;
-        uint8_t remaining_energy;
     } __packed__ data;
 
     uint16_t crc;

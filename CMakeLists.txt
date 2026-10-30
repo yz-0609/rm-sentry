@@ -97,7 +97,8 @@ elseif ("${CMAKE_BUILD_TYPE}" STREQUAL "MinSizeRel")
     add_compile_options(-Os)
 else ()
     message(STATUS "Minimal optimization, debug info included")
-    add_compile_options(-Og -g -gdwarf-2)
+    # Orbit 1.1.7 requires numeric DWARF member offsets for struct watches.
+    add_compile_options(-Og -g -gdwarf-4)
     add_definitions(-DESC_DEBUG) # ESC Debug
 endif ()
 

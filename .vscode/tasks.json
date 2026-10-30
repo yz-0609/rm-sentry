@@ -15,7 +15,7 @@
         {
             "label": "download dap",
             "type": "shell",
-            "command": "mingw32-make -j24 ; mingw32-make download_dap",
+            "command": "mingw32-make -j24 download_dap",
             "group": {
                 "kind": "build",
                 "isDefault": false

@@ -629,12 +629,18 @@ static void UsbSendAllRobotHpData(void)
     SEND_DATA_ALL_ROBOT_HP.time_stamp = DWT_GetTimeline_ms();
 
     SEND_DATA_ALL_ROBOT_HP.data.ally_1_robot_HP = refer_data->GameRobotHP.ally_1_robot_HP;
-    SEND_DATA_ALL_ROBOT_HP.data.ally_2_robot_HP = refer_data->GameRobotHP.ally_2_robot_HP;
+    SEND_DATA_ALL_ROBOT_HP.data.ally_2_robot_HP = 0; // RM2027保留原工程槽位
     SEND_DATA_ALL_ROBOT_HP.data.ally_3_robot_HP = refer_data->GameRobotHP.ally_3_robot_HP;
     SEND_DATA_ALL_ROBOT_HP.data.ally_4_robot_HP = refer_data->GameRobotHP.ally_4_robot_HP;
-    SEND_DATA_ALL_ROBOT_HP.data.reserved = refer_data->GameRobotHP.reserved;
+    SEND_DATA_ALL_ROBOT_HP.data.reserved = 0;
     SEND_DATA_ALL_ROBOT_HP.data.ally_7_robot_HP = refer_data->GameRobotHP.ally_7_robot_HP;
-    SEND_DATA_ALL_ROBOT_HP.data.ally_outpost_HP = refer_data->GameRobotHP.ally_outpost_HP;
+    // 保留开局己方一侧前哨的含义，不随阵地控制状态改变
+    if (refer_data->GameRobotState.robot_id == RobotID_RSentry)
+        SEND_DATA_ALL_ROBOT_HP.data.ally_outpost_HP = refer_data->GameRobotHP.outpost_R_HP;
+    else if (refer_data->GameRobotState.robot_id == RobotID_BSentry)
+        SEND_DATA_ALL_ROBOT_HP.data.ally_outpost_HP = refer_data->GameRobotHP.outpost_B_HP;
+    else
+        SEND_DATA_ALL_ROBOT_HP.data.ally_outpost_HP = 0;
     SEND_DATA_ALL_ROBOT_HP.data.ally_base_HP = refer_data->GameRobotHP.ally_base_HP;
 
 
@@ -682,16 +688,18 @@ static void UsbSendGroundRobotPositionData(void)
 {
     SEND_GROUND_ROBOT_POSITION_DATA.time_stamp = DWT_GetTimeline_ms();
 
-    SEND_GROUND_ROBOT_POSITION_DATA.data.hero_x = refer_data->GroundRobotPos.hero_x;
-    SEND_GROUND_ROBOT_POSITION_DATA.data.hero_y = refer_data->GroundRobotPos.hero_y;
-    SEND_GROUND_ROBOT_POSITION_DATA.data.engineer_x = refer_data->GroundRobotPos.engineer_x;
-    SEND_GROUND_ROBOT_POSITION_DATA.data.engineer_y = refer_data->GroundRobotPos.engineer_y;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.hero_x = refer_data->GroundRobotPos.heavyengineer_x;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.hero_y = refer_data->GroundRobotPos.heavyengineer_y;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.engineer_x = 0.0f;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.engineer_y = 0.0f;
     SEND_GROUND_ROBOT_POSITION_DATA.data.standard_3_x = refer_data->GroundRobotPos.standard_3_x;
     SEND_GROUND_ROBOT_POSITION_DATA.data.standard_3_y = refer_data->GroundRobotPos.standard_3_y;
     SEND_GROUND_ROBOT_POSITION_DATA.data.standard_4_x = refer_data->GroundRobotPos.standard_4_x;
     SEND_GROUND_ROBOT_POSITION_DATA.data.standard_4_y = refer_data->GroundRobotPos.standard_4_y;
-    SEND_GROUND_ROBOT_POSITION_DATA.data.reserved1 = refer_data->GroundRobotPos.reserved1;
-    SEND_GROUND_ROBOT_POSITION_DATA.data.reserved2 = refer_data->GroundRobotPos.reserved2;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.standard_5_x = 0.0f;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.standard_5_y = 0.0f;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.reserved1 = 0.0f;
+    SEND_GROUND_ROBOT_POSITION_DATA.data.reserved2 = 0.0f;
 
     append_CRC16_check_sum((uint8_t *)&SEND_GROUND_ROBOT_POSITION_DATA, sizeof(SendDataGroundRobotPosition_s));
     USBTransmit((uint8_t *)&SEND_GROUND_ROBOT_POSITION_DATA, sizeof(SendDataGroundRobotPosition_s));
@@ -705,43 +713,8 @@ static void UsbSendRfidStatusData(void)
 {
     SEND_RFID_STATUS_DATA.time_stamp = DWT_GetTimeline_ms();
 
-    // 基地与高地
-    SEND_RFID_STATUS_DATA.data.base_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 0)) != 0;
-    SEND_RFID_STATUS_DATA.data.circular_highland_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 1)) != 0;
-    SEND_RFID_STATUS_DATA.data.enemy_circular_highland_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 2)) != 0;
-    
-    // 梯形高地（新版对应原R3/B3）
-    SEND_RFID_STATUS_DATA.data.friendly_r3_b3_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 3)) != 0;
-    SEND_RFID_STATUS_DATA.data.enemy_r3_b3_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 4)) != 0;
-    
-    // 新版已取消的地形，直接赋0 (false)
-    SEND_RFID_STATUS_DATA.data.friendly_r4_b4_gain_point = 0;
-    SEND_RFID_STATUS_DATA.data.enemy_r4_b4_gain_point = 0;
-    SEND_RFID_STATUS_DATA.data.energy_mechanism_gain_point = 0;
-    
-    // 飞坡增益点
-    SEND_RFID_STATUS_DATA.data.friendly_fly_ramp_front_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 5)) != 0;
-    SEND_RFID_STATUS_DATA.data.friendly_fly_ramp_back_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 6)) != 0;
-    SEND_RFID_STATUS_DATA.data.enemy_fly_ramp_front_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 7)) != 0;
-    SEND_RFID_STATUS_DATA.data.enemy_fly_ramp_back_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 8)) != 0;
-    
-    // 前哨站
-    SEND_RFID_STATUS_DATA.data.friendly_outpost_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 18)) != 0;
-    
-    // 补血点（新版为补给区，bit 19 或 bit 20 任一激活即视为激活）
-    SEND_RFID_STATUS_DATA.data.friendly_healing_point = ((refer_data->RFIDStatus.rfid_status & (1U << 19)) != 0) || ((refer_data->RFIDStatus.rfid_status & (1U << 20)) != 0);
-    
-    // 新版已取消的地形（哨兵区、资源岛、兑换区），直接赋0 (false)
-    SEND_RFID_STATUS_DATA.data.friendly_sentry_patrol_area = 0;
-    SEND_RFID_STATUS_DATA.data.enemy_sentry_patrol_area = 0;
-    SEND_RFID_STATUS_DATA.data.friendly_big_resource_island = 0;
-    SEND_RFID_STATUS_DATA.data.enemy_big_resource_island = 0;
-    SEND_RFID_STATUS_DATA.data.friendly_exchange_area = 0;
-    
-    // 中心增益点 (仅 RMUL 适用)
-    SEND_RFID_STATUS_DATA.data.center_gain_point = (refer_data->RFIDStatus.rfid_status & (1U << 23)) != 0;
-
-
+    SEND_RFID_STATUS_DATA.data.rfid_status = refer_data->RFIDStatus.rfid_status;
+    SEND_RFID_STATUS_DATA.data.rfid_status_2 = refer_data->RFIDStatus.rfid_status_2;
     append_CRC16_check_sum((uint8_t *)&SEND_RFID_STATUS_DATA, sizeof(SendDataRfidStatus_s));
     USBTransmit((uint8_t *)&SEND_RFID_STATUS_DATA, sizeof(SendDataRfidStatus_s));
 }
@@ -764,7 +737,7 @@ static void UsbSendRobotStatusData(void)
     SEND_ROBOT_STATUS_DATA.data.robot_pos_y=refer_data->GameRobotPos.y;
     SEND_ROBOT_STATUS_DATA.data.robot_pos_angle=refer_data->GameRobotPos.angle;
     SEND_ROBOT_STATUS_DATA.data.armor_id=refer_data->RobotHurt.armor_id;
-    SEND_ROBOT_STATUS_DATA.data.hp_deduction_reason=refer_data->RobotHurt.hurt_type;
+    SEND_ROBOT_STATUS_DATA.data.hp_deduction_reason=refer_data->RobotHurt.HP_deduction_reason;
     SEND_ROBOT_STATUS_DATA.data.projectile_allowance_17mm=refer_data->ProjectileAllowance.projectile_allowance_17mm;
     SEND_ROBOT_STATUS_DATA.data.remaining_gold_coin=refer_data->ProjectileAllowance.remaining_gold_coin;
     
@@ -797,7 +770,6 @@ static void UsbSendBuffData(void)
     SEND_BUFF_DATA.data.cooling_buff=refer_data->BuffMusk.cooling_buff;
     SEND_BUFF_DATA.data.recovery_buff=refer_data->BuffMusk.recovery_buff;
     SEND_BUFF_DATA.data.vulnerability_buff=refer_data->BuffMusk.vulnerability_buff;
-    SEND_BUFF_DATA.data.remaining_energy=refer_data->BuffMusk.remaining_energy;
 
     append_CRC16_check_sum((uint8_t *)&SEND_BUFF_DATA, sizeof(SendDataBuff_s));
     USBTransmit((uint8_t *)&SEND_BUFF_DATA, sizeof(SendDataBuff_s));

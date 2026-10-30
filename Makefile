@@ -278,7 +278,8 @@ ASFLAGS = $(MCU) $(AS_DEFS) $(AS_INCLUDES) $(OPT) -fdata-sections -ffunction-sec
 CFLAGS += $(MCU) $(C_DEFS) $(C_INCLUDES) $(OPT) -fdata-sections -ffunction-sections -fmessage-length=0 -Werror
 
 ifeq ($(DEBUG), 1)
-CFLAGS += -g -gdwarf-2
+# Orbit 1.1.7 requires numeric DWARF member offsets for struct watches.
+CFLAGS += -g -gdwarf-4
 endif
 
 
@@ -349,8 +350,9 @@ clean:
 #######################################
 # download directl without debugging
 #######################################
-download_dap:
-	openocd -f openocd_dap.cfg -c init -c halt -c "flash write_image erase $(BUILD_DIR)/$(TARGET).bin 0x08000000" -c reset -c shutdown
+.PHONY: download_dap
+download_dap: all
+	openocd -f openocd_dap.cfg -c "program $(BUILD_DIR)/$(TARGET).bin 0x08000000 verify reset exit"
 download_jlink:
 	JFlash -openprj'stm32.jflash' -open'$(BUILD_DIR)/$(TARGET).hex',0x8000000 -auto -startapp -exit
   

@@ -2,6 +2,24 @@
     // 启动调试的快捷键是F5
     "version": "0.2.0",
     "configurations": [
+        {
+            "name": "Orbit DAPLink STM32F407IG",
+            "type": "orbit",
+            "request": "launch",
+            "device": "STM32F407IG",
+            "probe": "cmsis-dap",
+            "cmsisDapTransport": "auto",
+            "interface": "SWD",
+            "speedKHz": 1000,
+            "program": "${workspaceFolder}/build/basic_framework.elf",
+            "svdFile": "${workspaceFolder}/STM32F407.svd",
+            "preLaunchTask": "build task",
+            "flashBeforeDebug": true,
+            "runToEntryPoint": "main",
+            "rttLogEnabled": true,
+            "rttBufferIndex": 0,
+            "rttLogTarget": "terminal"
+        },
 
         // 使用dap-link(如无线调试器时的参考配置)
         {
