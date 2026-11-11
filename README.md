@@ -1,7 +1,5 @@
 # RM Sentry · 哨兵机器人嵌入式电控系统
 
-[![Firmware Build](https://github.com/yz-0609/rm-sentry/actions/workflows/firmware-build.yml/badge.svg?branch=main&event=push)](https://github.com/yz-0609/rm-sentry/actions/workflows/firmware-build.yml)
-
 基于 **STM32F407 + FreeRTOS** 的 RoboMaster 哨兵机器人电控项目，覆盖底盘、云台、发射机构、姿态解算和上下位机通信，完成导航速度、视觉目标与执行机构之间的控制衔接。
 
 **技术栈：** C · STM32F407 · FreeRTOS · CAN · UART/DMA · USB CDC · BMI088 · PID · 底盘运动学
@@ -197,8 +195,6 @@ mingw32-make -j4
 ```
 
 输出文件：`build/basic_framework.elf`、`build/basic_framework.hex`、`build/basic_framework.bin`。
-
-[Firmware Build](.github/workflows/firmware-build.yml) 会在推送到 `main` 或提交 Pull Request 时自动编译默认固件，并检查三个输出文件是否生成；也支持在 GitHub Actions 页面手动运行。页面顶部的[状态徽章](https://docs.github.com/en/actions/how-tos/monitor-workflows/add-a-status-badge)跟踪 `main` 分支推送触发的构建结果。
 
 <details>
 <summary>展开硬件配置、烧录与调试说明</summary>
