@@ -70,6 +70,9 @@ static void InitQuaternion(float *init_q4)
     }
     for (uint8_t i = 0; i < 3; ++i)
         acc_init[i] /= 100;
+    
+    float unused_gyro[3] = {0};
+    IMU_Param_Correction(&IMU_Param, unused_gyro, acc_init);
     Norm3d(acc_init);
     // 计算原始加速度矢量和导航系重力加速度矢量的夹角
     float angle = acosf(Dot3d(acc_init, gravity_norm));
@@ -95,7 +98,7 @@ attitude_t *INS_Init(void)
     IMU_Param.scale[Y] = 1;
     IMU_Param.scale[Z] = 1;
     IMU_Param.Yaw = 0;
-    IMU_Param.Pitch = 0;
+    IMU_Param.Pitch = 180.0f; // 由于IMU安装方向的原因,Pitch需要加180度
     IMU_Param.Roll = 0;
     IMU_Param.flag = 1;
     
